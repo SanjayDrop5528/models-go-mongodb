@@ -45,6 +45,11 @@ func (b *QueryBuilder) BuildFilter(q query.Query) map[string]any {
 				opts = "i"
 			}
 			cond = map[string]any{f.Field: map[string]any{"$regex": pat, "$options": opts}}
+		case query.OpNotLike:
+			pat := strings.ReplaceAll(fmt.Sprintf("%v", f.Value), "%", ".*")
+			cond = map[string]any{f.Field: map[string]any{"$not": map[string]any{"$regex": pat, "$options": "i"}}}
+		case query.OpBetween:
+			cond = map[string]any{f.Field: map[string]any{"$gte": f.Value, "$lte": f.ValueTo}}
 		case query.OpIsNull:
 			cond = map[string]any{f.Field: nil}
 		case query.OpIsNotNull:
