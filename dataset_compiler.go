@@ -78,13 +78,36 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 
 	// 2. $lookup stages for joins
 	for _, j := range ast.Joins {
-		lookupStage := map[string]any{
-			"$lookup": map[string]any{
-				"from":         j.ToTable,
-				"localField":   j.FromField,
-				"foreignField": j.ToField,
-				"as":           j.Alias,
-			},
+		var lookupStage map[string]any
+		if j.ConvertString {
+			lookupStage = map[string]any{
+				"$lookup": map[string]any{
+					"from": j.ToTable,
+					"let":  map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
+					"pipeline": []map[string]any{
+						{
+							"$match": map[string]any{
+								"$expr": map[string]any{
+									"$eq": []any{
+										map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)},
+										map[string]any{"$toString": "$$localVal"},
+									},
+								},
+							},
+						},
+					},
+					"as": j.Alias,
+				},
+			}
+		} else {
+			lookupStage = map[string]any{
+				"$lookup": map[string]any{
+					"from":         j.ToTable,
+					"localField":   j.FromField,
+					"foreignField": j.ToField,
+					"as":           j.Alias,
+				},
+			}
 		}
 		stages = append(stages, lookupStage)
 	}
