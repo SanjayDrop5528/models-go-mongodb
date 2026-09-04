@@ -80,6 +80,19 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 	for _, j := range ast.Joins {
 		var lookupStage map[string]any
 		if j.ConvertString {
+			var localExpr any = "$$localVal"
+			var foreignExpr any = fmt.Sprintf("$%s", j.ToField)
+
+			switch strings.ToUpper(j.CastMode) {
+			case "FROM_ONLY":
+				localExpr = map[string]any{"$toString": "$$localVal"}
+			case "TO_ONLY":
+				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
+			default:
+				localExpr = map[string]any{"$toString": "$$localVal"}
+				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
+			}
+
 			lookupStage = map[string]any{
 				"$lookup": map[string]any{
 					"from": j.ToTable,
@@ -89,8 +102,8 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 							"$match": map[string]any{
 								"$expr": map[string]any{
 									"$eq": []any{
-										map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)},
-										map[string]any{"$toString": "$$localVal"},
+										foreignExpr,
+										localExpr,
 									},
 								},
 							},
