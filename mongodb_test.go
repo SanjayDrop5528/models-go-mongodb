@@ -59,13 +59,64 @@ func TestMongo_QueryFilter(t *testing.T) {
 		Where("age", query.OpGt, 30).
 		Where("name", query.OpEq, "Alice")
 
-	filterDoc := qb.BuildFilter(q)
-
-	if filterDoc["name"] != "Alice" {
-		t.Fatalf("expected name Alice, got %v", filterDoc["name"])
+	filter := qb.BuildFilter(q)
+	if filter["name"] != "Alice" {
+		t.Fatalf("expected name Alice, got %v", filter["name"])
 	}
-	ageCond, ok := filterDoc["age"].(map[string]any)
-	if !ok || ageCond["$gt"] != 30 {
-		t.Fatalf("expected age $gt 30, got %v", filterDoc["age"])
+	if gt, ok := filter["age"].(map[string]any); !ok || gt["$gt"] != 30 {
+		t.Fatalf("expected age > 30, got %v", filter["age"])
+	}
+}
+
+func TestMongo_UnifiedQueryPipeline(t *testing.T) {
+	qb := &mongodb.QueryBuilder{}
+
+	q := query.New().
+		Table("users").
+		Where("status = ?", "active").
+		Column("id", "name", "email").
+		ExcludeColumn("password").
+		Relation("Profile").
+		OrderBy("created_at", query.SortDesc).
+		Limit(10).
+		Offset(5)
+
+	pipeline := qb.BuildPipeline(q)
+
+	if len(pipeline) < 5 {
+		t.Fatalf("expected at least 5 pipeline stages, got %d", len(pipeline))
+	}
+
+	hasMatch := false
+	hasLookup := false
+	hasProject := false
+	hasSort := false
+	hasSkip := false
+	hasLimit := false
+
+	for _, stage := range pipeline {
+		if _, ok := stage["$match"]; ok {
+			hasMatch = true
+		}
+		if _, ok := stage["$lookup"]; ok {
+			hasLookup = true
+		}
+		if _, ok := stage["$project"]; ok {
+			hasProject = true
+		}
+		if _, ok := stage["$sort"]; ok {
+			hasSort = true
+		}
+		if _, ok := stage["$skip"]; ok {
+			hasSkip = true
+		}
+		if _, ok := stage["$limit"]; ok {
+			hasLimit = true
+		}
+	}
+
+	if !hasMatch || !hasLookup || !hasProject || !hasSort || !hasSkip || !hasLimit {
+		t.Fatalf("missing pipeline stage: match=%v, lookup=%v, project=%v, sort=%v, skip=%v, limit=%v",
+			hasMatch, hasLookup, hasProject, hasSort, hasSkip, hasLimit)
 	}
 }
