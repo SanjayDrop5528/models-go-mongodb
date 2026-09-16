@@ -54,6 +54,21 @@ func (a *MongoAdapter) Name() string {
 	return "mongodb"
 }
 
+// Capabilities returns MongoDB's supported feature matrix.
+func (a *MongoAdapter) Capabilities() adapter.Capabilities {
+	return adapter.Capabilities{
+		Category:                    adapter.StorageCategoryDocument,
+		SupportsTransactions:        true,
+		SupportsDDLMigration:        false,
+		SupportsProcedures:          false,
+		SupportsFunctions:           false,
+		SupportsAggregationPipeline: true,
+		SupportsJSONValidation:      true,
+		SupportsIndexes:             true,
+		SupportedSaveModes:          []string{"QUERY"},
+	}
+}
+
 // Client returns the underlying *mongo.Client handle.
 func (a *MongoAdapter) Client() *mongo.Client {
 	a.mu.RLock()
@@ -841,6 +856,60 @@ func (a *MongoAdapter) Execute(ctx context.Context, req execution.ExecutionReque
 		}
 		return &execution.ExecutionResult{
 			Data:   map[string]any{"command": req.Target, "arguments": req.Arguments},
+			Status: "SUCCESS",
+		}, nil
+
+	case operation.OpQuery:
+		client, err := a.getClient(ctx)
+		if err != nil || client == nil {
+			return &execution.ExecutionResult{
+				Data:   []map[string]any{},
+				Status: "SUCCESS",
+			}, nil
+		}
+		collName := ""
+		if req.Arguments != nil {
+			if c, ok := req.Arguments["collection"].(string); ok {
+				collName = c
+			}
+		}
+		if collName == "" {
+			return &execution.ExecutionResult{
+				Data:   []map[string]any{},
+				Status: "SUCCESS",
+			}, nil
+		}
+
+		var rawStages []any
+		if err := json.Unmarshal([]byte(req.Target), &rawStages); err != nil {
+			return nil, fmt.Errorf("failed parsing MongoDB pipeline JSON: %w", err)
+		}
+
+		pipeline := make(mongo.Pipeline, 0, len(rawStages)+1)
+		for _, s := range rawStages {
+			stageBytes, _ := json.Marshal(s)
+			var doc bson.D
+			if err := bson.UnmarshalExtJSON(stageBytes, true, &doc); err == nil {
+				pipeline = append(pipeline, doc)
+			}
+		}
+		pipeline = append(pipeline, bson.D{{Key: "$limit", Value: 50}})
+
+		cursor, err := client.Database(a.database).Collection(collName).Aggregate(ctx, pipeline)
+		if err != nil {
+			return nil, fmt.Errorf("failed executing MongoDB aggregation pipeline: %w", err)
+		}
+		defer cursor.Close(ctx)
+
+		var resultRows []map[string]any
+		if err := cursor.All(ctx, &resultRows); err != nil {
+			return nil, err
+		}
+		if resultRows == nil {
+			resultRows = make([]map[string]any, 0)
+		}
+		return &execution.ExecutionResult{
+			Data:   resultRows,
 			Status: "SUCCESS",
 		}, nil
 
