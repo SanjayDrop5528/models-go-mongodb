@@ -1,3 +1,11 @@
+// Package mongodb implements the MongoDB storage adapter, BSON query compiler,
+// aggregation pipeline generator, and Dataset Studio compiler.
+//
+// File: query.go
+// Usage:
+//   This file implements the MongoDB QueryBuilder, translating universal query.Query
+//   specifications into MongoDB BSON filter documents ($match, $or, $and, $in, $regex, etc.).
+//   It powers CRUD queries, filtering, and aggregation stages on MongoAdapter collections.
 package mongodb
 
 import (
@@ -11,6 +19,15 @@ import (
 type QueryBuilder struct{}
 
 // BuildFilter translates query filters, raw expressions, and where groups to MongoDB filter documents.
+//
+// Purpose:
+//   Converts structured query.Filter conditions and raw expressions into standard MongoDB BSON filter maps.
+//
+// Where it is used:
+//   - Called by MongoAdapter.Find, FindOne, Update, and Delete operations.
+//
+// When can it be used:
+//   - When executing document queries or building $match pipeline stages.
 func (b *QueryBuilder) BuildFilter(q query.Query) map[string]any {
 	filterDoc := make(map[string]any)
 	var andClauses []map[string]any

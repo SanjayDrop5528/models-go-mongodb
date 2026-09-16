@@ -1,3 +1,12 @@
+// Package mongodb implements the MongoDB storage adapter, BSON query compiler,
+// aggregation pipeline generator, and Dataset Studio compiler.
+//
+// File: types.go
+// Usage:
+//   This file defines the type conversion mappings between core engine generic DataType
+//   enums (model.TypeString, model.TypeInt, model.TypeDecimal, model.TypeJSON, etc.) and
+//   MongoDB BSON types (string, int, long, double, bool, date, object, array, binData).
+//   It also builds MongoDB collection $jsonSchema validator documents.
 package mongodb
 
 import (
@@ -6,6 +15,15 @@ import (
 )
 
 // ToBSONType maps core DataType to MongoDB $jsonSchema bsonType.
+//
+// Purpose:
+//   Translates a generic engine data type enum into the corresponding BSON type name string.
+//
+// Where it is used:
+//   - Used by BuildJSONSchema and aggregation projection logic.
+//
+// When can it be used:
+//   - When declaring BSON schema validation rules or type checks in MongoDB.
 func ToBSONType(t model.DataType) string {
 	switch t {
 	case model.TypeString, model.TypeText:
@@ -32,6 +50,15 @@ func ToBSONType(t model.DataType) string {
 }
 
 // BuildJSONSchema creates a MongoDB $jsonSchema validator document from a schema.
+//
+// Purpose:
+//   Generates a native MongoDB $jsonSchema document enforcing property types and required fields on collections.
+//
+// Where it is used:
+//   - Used during collection creation and schema validation rule updates on MongoAdapter.
+//
+// When can it be used:
+//   - When establishing schema validation on a MongoDB collection.
 func BuildJSONSchema(s *schema.Schema) map[string]any {
 	properties := make(map[string]any)
 	var required []string

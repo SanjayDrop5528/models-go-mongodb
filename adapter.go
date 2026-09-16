@@ -1,3 +1,13 @@
+// Package mongodb implements the MongoDB storage adapter, BSON query compiler,
+// aggregation pipeline generator, and Dataset Studio compiler.
+//
+// File: adapter.go
+// Usage:
+//   This file implements the MongoAdapter, satisfying the universal adapter.Adapter
+//   and adapter.DataSetAdapter interfaces for document stores. It supports live database
+//   operations via go.mongodb.org/mongo-driver/mongo as well as an in-memory mock store
+//   for offline testing. It manages collections, document CRUD, aggregation pipelines,
+//   JSON Schema validation rules, and atomic transactions.
 package mongodb
 
 import (
@@ -5,6 +15,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/SanjayDrop5528/models-go-engine/adapter"
 	"github.com/SanjayDrop5528/models-go-engine/diff"
 	"github.com/SanjayDrop5528/models-go-engine/execution"
@@ -14,9 +28,6 @@ import (
 	"github.com/SanjayDrop5528/models-go-engine/plan"
 	"github.com/SanjayDrop5528/models-go-engine/query"
 	"github.com/SanjayDrop5528/models-go-engine/schema"
-	"strings"
-	"sync"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -37,6 +48,15 @@ type MongoAdapter struct {
 }
 
 // NewMongoAdapter creates a new MongoDB adapter instance.
+//
+// Purpose:
+//   Initializes a MongoAdapter configured with connection URI, database name, and mock fallback storage.
+//
+// Where it is used:
+//   - Instantiated in server setups, document store integration tests, and multi-tenant applications.
+//
+// When can it be used:
+//   - When connecting the models engine or Dataset Studio to a MongoDB instance or replica set.
 func NewMongoAdapter(uri, database string) *MongoAdapter {
 	if database == "" {
 		database = "dev"
