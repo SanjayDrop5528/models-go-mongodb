@@ -398,9 +398,14 @@ func (c *MongoDataSetCompiler) applyFilterCondition(matchStage map[string]any, p
 			}
 		} else {
 			for _, p := range params {
-				if strings.EqualFold(p.ParamName, cond.ParamName) && p.DefaultValue != nil {
-					val = p.DefaultValue
-					break
+				if strings.EqualFold(p.ParamName, cond.ParamName) {
+					val = p.Paramvalue
+					if val == nil || val == "" {
+						val = p.DefaultValue
+					}
+					if val != nil {
+						break
+					}
 				}
 			}
 			if val == nil && cond.Value != nil {
