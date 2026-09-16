@@ -1,3 +1,13 @@
+// Package mongodb provides dataset aggregation pipeline compilation for MongoDB.
+//
+// Usage:
+// This file transforms an engine QueryAST and DataSet definition into a MongoDB aggregation
+// pipeline JSON string. It supports:
+// 1. Initial and post-lookup $match stages for WHERE filters.
+// 2. $lookup and $unwind stages for relational joins across collections.
+// 3. $addFields / $project stages for custom calculated columns and formula expressions.
+// 4. $group stages with MongoDB accumulators ($sum, $avg, $min, $max, $push, $addToSet).
+// 5. Parameterized pipeline outputs preserving {"paramName": "...", "paramDataType": "..."} tokens.
 package mongodb
 
 import (
@@ -16,11 +26,29 @@ import (
 type MongoDataSetCompiler struct{}
 
 // NewMongoDataSetCompiler creates a new MongoDB dataset compiler instance.
+//
+// Purpose:
+// Instantiates a MongoDataSetCompiler capable of translating an engine QueryAST into MongoDB aggregation stages.
+//
+// Where it is used:
+// Used in MongoAdapter.CompileDataSet, MongoAdapter.DataSetCompiler, and directly in unit tests and service registrations.
+//
+// When can it be used:
+// Can be used during application initialization or adapter registration to provide MongoDB aggregation pipeline compilation.
 func NewMongoDataSetCompiler() *MongoDataSetCompiler {
 	return &MongoDataSetCompiler{}
 }
 
 // Compile compiles the QueryAST into MongoDB JSON aggregation pipeline.
+//
+// Purpose:
+// Compiles a database-agnostic QueryAST into an executable JSON aggregation pipeline string and a reference pipeline.
+//
+// Where it is used:
+// Invoked by DataSetService.Preview, DataSetService.Save, and MongoAdapter.CompileDataSet.
+//
+// When can it be used:
+// Can be used whenever a DataSet definition has been planned and needs to be executed as an aggregation pipeline in MongoDB.
 func (c *MongoDataSetCompiler) Compile(ctx context.Context, ast *planner.QueryAST, ds *domain.DataSet) (*compiler.CompiledPipeline, error) {
 	if ast == nil {
 		return nil, domain.NewError(domain.ErrPipelineCompilationFailed, "cannot compile nil AST")
@@ -39,6 +67,16 @@ func (c *MongoDataSetCompiler) Compile(ctx context.Context, ast *planner.QueryAS
 	}, nil
 }
 
+// buildPipelineJSON constructs the MongoDB aggregation pipeline as a JSON array string.
+//
+// Purpose:
+// Assembles all aggregation stages ($match, $lookup, $unwind, $addFields, $group, $project) from the QueryAST into valid JSON.
+//
+// Where it is used:
+// Called internally by Compile to generate executable and reference pipeline JSON strings.
+//
+// When can it be used:
+// Can be used during compilation whenever a QueryAST must be serialized into a MongoDB aggregation pipeline.
 func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, parameterized bool) string {
 	var stages []map[string]any
 
@@ -362,6 +400,16 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 	return string(bytes)
 }
 
+// resolveFieldPath resolves a table-qualified column into its MongoDB document field path.
+//
+// Purpose:
+// Translates a table and column reference into either a root field name or a nested join path (e.g., "author.name").
+//
+// Where it is used:
+// In resolveFieldRef and $sort, $project, and $group stage assembly.
+//
+// When can it be used:
+// Can be used whenever mapping a relational table.column pair to a document path in MongoDB.
 func (c *MongoDataSetCompiler) resolveFieldPath(table, field string, ast *planner.QueryAST) string {
 	if table == "" || table == ast.BaseTable.Table || table == ast.BaseTable.Alias {
 		return field
@@ -374,10 +422,30 @@ func (c *MongoDataSetCompiler) resolveFieldPath(table, field string, ast *planne
 	return fmt.Sprintf("%s.%s", table, field)
 }
 
+// resolveFieldRef resolves a table and field into a MongoDB expression field reference (prefixed with "$").
+//
+// Purpose:
+// Prepends "$" to the resolved document field path so it can be evaluated as an expression in MongoDB stages.
+//
+// Where it is used:
+// In formatMongoOperand and aggregation accumulators ($sum, $avg, $min, $max).
+//
+// When can it be used:
+// Can be used whenever an aggregation expression needs a dynamic field reference.
 func (c *MongoDataSetCompiler) resolveFieldRef(table, field string, ast *planner.QueryAST) string {
 	return "$" + c.resolveFieldPath(table, field, ast)
 }
 
+// formatMongoOperand converts an ASTOperand into a MongoDB expression value or field reference.
+//
+// Purpose:
+// Formats literals as raw Go values and column references as "$" field references.
+//
+// Where it is used:
+// In buildMongoExpression when evaluating formula arguments and custom columns.
+//
+// When can it be used:
+// Can be used whenever converting an operand into a MongoDB aggregation expression value.
 func (c *MongoDataSetCompiler) formatMongoOperand(op planner.ASTOperand, ast *planner.QueryAST) any {
 	if op.IsLiteral || op.SourceTable == "_LITERAL_" {
 		return op.LiteralVal
@@ -388,13 +456,24 @@ func (c *MongoDataSetCompiler) formatMongoOperand(op planner.ASTOperand, ast *pl
 	return c.resolveFieldRef(op.SourceTable, op.SourceField, ast)
 }
 
+// applyFilterCondition applies a filter condition to a MongoDB $match stage map.
+//
+// Purpose:
+// Converts abstract filter operators (=, !=, >, >=, <, <=, IN, NOT IN, LIKE, IS NULL) into MongoDB query operators.
+// Also handles runtime parameter substitution or preservation of parameterized placeholders.
+//
+// Where it is used:
+// In buildPipelineJSON for root collection WHERE filters and post-lookup join filters.
+//
+// When can it be used:
+// Can be used whenever filtering MongoDB documents using relational condition ASTs.
 func (c *MongoDataSetCompiler) applyFilterCondition(matchStage map[string]any, path string, cond planner.ASTCondition, parameterized bool, params []domain.FilterParam) {
 	var val any
 	if cond.IsParamRef {
 		if parameterized {
 			val = map[string]any{
-				"ParamsName":    cond.ParamName,
-				"parmsDataType": cond.ParamDataType,
+				"paramName":     cond.ParamName,
+				"paramDataType": cond.ParamDataType,
 			}
 		} else {
 			for _, p := range params {
@@ -454,6 +533,17 @@ func (c *MongoDataSetCompiler) applyFilterCondition(matchStage map[string]any, p
 	}
 }
 
+// buildMongoExpression compiles a custom column formula or function call into a MongoDB expression tree.
+//
+// Purpose:
+// Maps abstract functions (ADD, SUBTRACT, MULTIPLY, DIVIDE, CONCAT, UPPER, LOWER, DATEDIFF, ROUND, etc.)
+// into MongoDB expression operators ($add, $subtract, $multiply, $divide, $concat, $toUpper, etc.).
+//
+// Where it is used:
+// In buildPipelineJSON during $addFields and $project stage creation.
+//
+// When can it be used:
+// Can be used whenever calculating derived fields or mathematical expressions in MongoDB.
 func (c *MongoDataSetCompiler) buildMongoExpression(cc planner.ASTCustomColumn, ast *planner.QueryAST) any {
 	fnName := ""
 	if cc.Function != nil {
@@ -675,11 +765,29 @@ func (c *MongoDataSetCompiler) buildMongoExpression(cc planner.ASTCustomColumn, 
 }
 
 // CompileDataSet compiles QueryAST into MongoDB JSON pipeline.
+//
+// Purpose:
+// Compiles an engine QueryAST and DataSet definition into a MongoDB-specific CompiledPipeline.
+//
+// Where it is used:
+// Invoked directly on MongoAdapter or by external callers requiring MongoDB pipeline compilation.
+//
+// When can it be used:
+// Can be used whenever an application holds a MongoAdapter instance and needs to compile a dataset.
 func (a *MongoAdapter) CompileDataSet(ctx context.Context, ast *planner.QueryAST, ds *domain.DataSet) (*compiler.CompiledPipeline, error) {
 	return NewMongoDataSetCompiler().Compile(ctx, ast, ds)
 }
 
 // DataSetCompiler returns the adapter.DataSetCompiler instance.
+//
+// Purpose:
+// Returns the generic adapter.DataSetCompiler interface wrapper for registering with DataSetService.
+//
+// Where it is used:
+// In application bootstrap and dependency injection (e.g. service.RegisterCompiler("mongodb", mongoAdapter.DataSetCompiler())).
+//
+// When can it be used:
+// Can be used when initializing the dataset engine and registering MongoDB aggregation compiler capabilities.
 func (a *MongoAdapter) DataSetCompiler() adapter.DataSetCompiler {
 	return &genericCompilerWrapper{c: NewMongoDataSetCompiler()}
 }
@@ -688,6 +796,16 @@ type genericCompilerWrapper struct {
 	c compiler.DataSetCompiler
 }
 
+// Compile adapts generic untyped arguments to typed AST and DataSet compiler calls.
+//
+// Purpose:
+// Unpacks generic any interface values into *planner.QueryAST and *domain.DataSet and delegates to the underlying compiler.
+//
+// Where it is used:
+// Called dynamically by DataSetService.Preview and DataSetService.Save via the adapter.DataSetCompiler interface.
+//
+// When can it be used:
+// Can be used whenever compiling across module boundaries where interface{} decoupling is employed.
 func (w *genericCompilerWrapper) Compile(ctx context.Context, ast any, ds any) (any, error) {
 	qAst, _ := ast.(*planner.QueryAST)
 	dSet, _ := ds.(*domain.DataSet)

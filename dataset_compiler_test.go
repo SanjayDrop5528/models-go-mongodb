@@ -84,7 +84,7 @@ func TestMongoDataSetCompiler_BaseFilterAndParams(t *testing.T) {
 	}
 	refMatch := refStages[0]["$match"].(map[string]any)
 	paramVal, ok := refMatch["status"].(map[string]any)
-	if !ok || paramVal["ParamsName"] != "status_param" {
+	if !ok || paramVal["paramName"] != "status_param" {
 		t.Errorf("expected status param metadata in reference pipeline, got %v", refMatch["status"])
 	}
 }
