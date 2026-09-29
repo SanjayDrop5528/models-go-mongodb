@@ -3,11 +3,12 @@
 //
 // File: adapter.go
 // Usage:
-//   This file implements the MongoAdapter, satisfying the universal adapter.Adapter
-//   and adapter.DataSetAdapter interfaces for document stores. It supports live database
-//   operations via go.mongodb.org/mongo-driver/mongo as well as an in-memory mock store
-//   for offline testing. It manages collections, document CRUD, aggregation pipelines,
-//   JSON Schema validation rules, and atomic transactions.
+//
+//	This file implements the MongoAdapter, satisfying the universal adapter.Adapter
+//	and adapter.DataSetAdapter interfaces for document stores. It supports live database
+//	operations via go.mongodb.org/mongo-driver/mongo as well as an in-memory mock store
+//	for offline testing. It manages collections, document CRUD, aggregation pipelines,
+//	JSON Schema validation rules, and atomic transactions.
 package mongodb
 
 import (
@@ -15,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -50,7 +52,8 @@ type MongoAdapter struct {
 // NewMongoAdapter creates a new MongoDB adapter instance.
 //
 // Purpose:
-//   Initializes a MongoAdapter configured with connection URI, database name, and mock fallback storage.
+//
+//	Initializes a MongoAdapter configured with connection URI, database name, and mock fallback storage.
 //
 // Where it is used:
 //   - Instantiated in server setups, document store integration tests, and multi-tenant applications.
@@ -577,6 +580,11 @@ func (a *MongoAdapter) Create(ctx context.Context, ref model.ModelRef, data map[
 
 // Find queries documents in live MongoDB or in-memory fallback.
 func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Query) ([]map[string]any, int64, error) {
+	q = q.EnsureDebugTrace()
+	started := time.Now()
+	if len(q.Relations) > 0 || len(q.RelationSpecs) > 0 {
+		return nil, 0, fmt.Errorf("mongodb adapter does not hydrate relations directly; execute this query through the CRUD engine")
+	}
 	collName := ref.StorageName
 	if collName == "" {
 		collName = ref.Name
@@ -584,11 +592,17 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 
 	client, err := a.getClient(ctx)
 	if err != nil {
+		if q.Debug {
+			log.Printf("[Query Debug][%s][MongoDB] phase=connection-error duration=%s error=%q", q.DebugTraceID, time.Since(started), err)
+		}
 		return nil, 0, err
 	}
 	if client != nil {
 		coll := client.Database(a.database).Collection(collName)
 		filter := a.queryBuilder.BuildFilter(q)
+		if q.Debug {
+			log.Printf("[Query Debug][%s][MongoDB] phase=compiled collection=%s relations=%v filter=%v fields=%v sorts=%v pagination=%+v", q.DebugTraceID, collName, q.Relations, q.DebugValue(filter, len(q.Filters)), q.Fields, q.Sorts, q.Pagination)
+		}
 
 		findOpts := options.Find()
 		if q.Pagination.Offset > 0 {
@@ -608,6 +622,9 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 
 		cursor, err := coll.Find(ctx, filter, findOpts)
 		if err != nil {
+			if q.Debug {
+				log.Printf("[Query Debug][%s][MongoDB] phase=execution-error duration=%s error=%q", q.DebugTraceID, time.Since(started), err)
+			}
 			return nil, 0, fmt.Errorf("mongodb find failed: %w", err)
 		}
 		defer cursor.Close(ctx)
@@ -615,11 +632,27 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 		var results []map[string]any
 		for cursor.Next(ctx) {
 			var doc map[string]any
-			if err := cursor.Decode(&doc); err == nil {
-				results = append(results, doc)
+			if err := cursor.Decode(&doc); err != nil {
+				if q.Debug {
+					log.Printf("[Query Debug][%s][MongoDB] phase=decode-error row=%d duration=%s error=%q", q.DebugTraceID, len(results)+1, time.Since(started), err)
+				}
+				return nil, 0, err
 			}
+			results = append(results, doc)
+		}
+		if err := cursor.Err(); err != nil {
+			if q.Debug {
+				log.Printf("[Query Debug][%s][MongoDB] phase=cursor-error rows=%d duration=%s error=%q", q.DebugTraceID, len(results), time.Since(started), err)
+			}
+			return nil, 0, err
 		}
 		total, _ := coll.CountDocuments(ctx, filter)
+		if q.Debug {
+			log.Printf("[Query Debug][%s][MongoDB] phase=complete duration=%s rows=%d total=%d", q.DebugTraceID, time.Since(started), len(results), total)
+			if elapsed := time.Since(started); q.IsSlow(elapsed) {
+				log.Printf("[Query Debug][%s][MongoDB] phase=slow-query duration=%s threshold_ms=%d", q.DebugTraceID, elapsed, q.SlowQueryThresholdMS)
+			}
+		}
 		return results, total, nil
 	}
 
@@ -628,24 +661,104 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 	defer a.mu.RUnlock()
 
 	docs := a.mockStore[collName]
-	total := int64(len(docs))
+	filtered := make([]map[string]any, 0, len(docs))
+	for _, doc := range docs {
+		if mongoMockMatches(doc, q.Filters) {
+			filtered = append(filtered, doc)
+		}
+	}
+	total := int64(len(filtered))
 	offset := q.Pagination.Offset
 	limit := q.Pagination.Limit
 
-	if offset > len(docs) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(filtered) {
+		if q.Debug {
+			log.Printf("[Query Debug][%s][MongoDB] phase=complete backend=offline-mock duration=%s rows=0 total=%d", q.DebugTraceID, time.Since(started), total)
+		}
 		return []map[string]any{}, total, nil
 	}
 
-	end := len(docs)
+	end := len(filtered)
 	if limit > 0 && offset+limit < end {
 		end = offset + limit
 	}
 
-	return docs[offset:end], total, nil
+	results := make([]map[string]any, 0, end-offset)
+	for _, doc := range filtered[offset:end] {
+		copyDoc := make(map[string]any)
+		if len(q.Fields) > 0 {
+			for _, field := range q.Fields {
+				if value, ok := doc[field]; ok {
+					copyDoc[field] = value
+				}
+			}
+		} else {
+			for key, value := range doc {
+				copyDoc[key] = value
+			}
+		}
+		results = append(results, copyDoc)
+	}
+	if q.Debug {
+		log.Printf("[Query Debug][%s][MongoDB] phase=complete backend=offline-mock duration=%s rows=%d total=%d", q.DebugTraceID, time.Since(started), len(results), total)
+	}
+	return results, total, nil
+}
+
+func mongoMockMatches(row map[string]any, filters []query.Filter) bool {
+	for _, filter := range filters {
+		actual, exists := row[filter.Field]
+		if !exists {
+			return false
+		}
+		equal := fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", filter.Value)
+		switch filter.Op {
+		case query.OpEq:
+			if !equal {
+				return false
+			}
+		case query.OpNeq:
+			if equal {
+				return false
+			}
+		case query.OpIn, query.OpNin:
+			found := false
+			values := reflect.ValueOf(filter.Value)
+			if values.IsValid() && (values.Kind() == reflect.Slice || values.Kind() == reflect.Array) {
+				for i := 0; i < values.Len(); i++ {
+					if fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", values.Index(i).Interface()) {
+						found = true
+						break
+					}
+				}
+			}
+			if (filter.Op == query.OpIn && !found) || (filter.Op == query.OpNin && found) {
+				return false
+			}
+		case query.OpIsNull:
+			if actual != nil {
+				return false
+			}
+		case query.OpIsNotNull:
+			if actual == nil {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // FindOne retrieves a document by ID.
 func (a *MongoAdapter) FindOne(ctx context.Context, ref model.ModelRef, id any) (map[string]any, error) {
+	return a.FindOneWithQuery(ctx, ref, id, query.NewQuery())
+}
+
+func (a *MongoAdapter) FindOneWithQuery(ctx context.Context, ref model.ModelRef, id any, q query.Query) (map[string]any, error) {
 	collName := ref.StorageName
 	if collName == "" {
 		collName = ref.Name
@@ -660,6 +773,21 @@ func (a *MongoAdapter) FindOne(ctx context.Context, ref model.ModelRef, id any) 
 		return nil, err
 	}
 	if client != nil {
+		if len(q.Relations) > 0 || len(q.RelationSpecs) > 0 || len(q.Fields) > 0 {
+			primaryKey := ref.PrimaryKey
+			if primaryKey == "" {
+				primaryKey = "id"
+			}
+			q = q.Where(primaryKey, query.OpEq, id).LimitOffset(1, 0)
+			rows, _, err := a.Find(ctx, ref, q)
+			if err != nil {
+				return nil, err
+			}
+			if len(rows) == 0 {
+				return nil, fmt.Errorf("document '%v' not found", id)
+			}
+			return rows[0], nil
+		}
 		coll := client.Database(a.database).Collection(collName)
 		filter := bson.M{
 			"$or": []bson.M{
@@ -997,6 +1125,19 @@ func (t *MongoTransaction) FindOne(ctx context.Context, m model.ModelRef, id any
 		return res, err
 	}
 	return t.adapter.FindOne(ctx, m, id)
+}
+
+func (t *MongoTransaction) FindOneWithQuery(ctx context.Context, m model.ModelRef, id any, q query.Query) (map[string]any, error) {
+	if t.session != nil {
+		var res map[string]any
+		err := mongo.WithSession(ctx, t.session, func(sc mongo.SessionContext) error {
+			var findErr error
+			res, findErr = t.adapter.FindOneWithQuery(sc, m, id, q)
+			return findErr
+		})
+		return res, err
+	}
+	return t.adapter.FindOneWithQuery(ctx, m, id, q)
 }
 
 func (t *MongoTransaction) Update(ctx context.Context, m model.ModelRef, id any, data map[string]any) (map[string]any, error) {
