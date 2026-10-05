@@ -38,6 +38,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+const (
+	ansiColorReset      = "\033[0m"
+	ansiColorYellowBold = "\033[1;33m"
+)
+
 // MongoAdapter implements the Adapter interface for MongoDB with live network and mock fallback support.
 type MongoAdapter struct {
 	uri          string
@@ -647,11 +652,16 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 			return nil, 0, err
 		}
 		total, _ := coll.CountDocuments(ctx, filter)
+		elapsed := time.Since(started)
 		if q.Debug {
-			log.Printf("[Query Debug][%s][MongoDB] phase=complete duration=%s rows=%d total=%d", q.DebugTraceID, time.Since(started), len(results), total)
-			if elapsed := time.Since(started); q.IsSlow(elapsed) {
-				log.Printf("[Query Debug][%s][MongoDB] phase=slow-query duration=%s threshold_ms=%d", q.DebugTraceID, elapsed, q.SlowQueryThresholdMS)
+			log.Printf("[Query Debug][%s][MongoDB] phase=complete duration=%s rows=%d total=%d", q.DebugTraceID, elapsed, len(results), total)
+		}
+		if q.IsSlow(elapsed) {
+			traceID := q.DebugTraceID
+			if traceID == "" {
+				traceID = "slow"
 			}
+			log.Printf("%s[Query Debug][%s][MongoDB] phase=slow-query duration=%s threshold_ms=%d%s", ansiColorYellowBold, traceID, elapsed, q.SlowQueryThresholdMS, ansiColorReset)
 		}
 		return results, total, nil
 	}
@@ -702,8 +712,16 @@ func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Que
 		}
 		results = append(results, copyDoc)
 	}
+	elapsed := time.Since(started)
 	if q.Debug {
-		log.Printf("[Query Debug][%s][MongoDB] phase=complete backend=offline-mock duration=%s rows=%d total=%d", q.DebugTraceID, time.Since(started), len(results), total)
+		log.Printf("[Query Debug][%s][MongoDB] phase=complete backend=offline-mock duration=%s rows=%d total=%d", q.DebugTraceID, elapsed, len(results), total)
+	}
+	if q.IsSlow(elapsed) {
+		traceID := q.DebugTraceID
+		if traceID == "" {
+			traceID = "slow"
+		}
+		log.Printf("%s[Query Debug][%s][MongoDB] phase=slow-query duration=%s threshold_ms=%d%s", ansiColorYellowBold, traceID, elapsed, q.SlowQueryThresholdMS, ansiColorReset)
 	}
 	return results, total, nil
 }
