@@ -1039,6 +1039,11 @@ func (a *MongoAdapter) Execute(ctx context.Context, req execution.ExecutionReque
 				collName = c
 			}
 		}
+		if collName == "" && req.Options != nil {
+			if c, ok := req.Options["collection"].(string); ok {
+				collName = c
+			}
+		}
 		if collName == "" {
 			return &execution.ExecutionResult{
 				Data:   []map[string]any{},
