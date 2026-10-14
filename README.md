@@ -4,6 +4,28 @@
 
 `models-go-mongodb` provides the MongoDB adapter for `models-go-engine`. It compiles relational Query AST into MongoDB `$lookup`, `$match`, `$project`, `$unwind`, and `$group` aggregation pipelines.
 
+## Prerequisites
+
+- Go 1.20 or newer.
+- MongoDB 6 or newer, reachable using a MongoDB URI.
+- A database and credentials with permission to read and write the target collections.
+
+## Usage Steps
+
+1. Set the MongoDB URI and database name in application configuration.
+2. Create the adapter with `mongodb.NewMongoAdapter(uri, database)`.
+3. Call `Connect(ctx)` and handle the connection error.
+4. Register the adapter/compiler with `models-go-engine`.
+5. Run queries, CRUD operations, or dataset preview/execute operations.
+6. Run `go test ./...` before committing changes.
+
+## Core Functionality
+
+- MongoDB connection and execution lifecycle.
+- Relational joins compiled to `$lookup` pipelines.
+- Filtering, projection, grouping, and array/object relation shaping.
+- Common engine execution and dataset compiler interfaces.
+
 ---
 
 ## 🛠️ Key Exported Functions & Methods Reference
