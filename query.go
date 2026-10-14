@@ -3,9 +3,10 @@
 //
 // File: query.go
 // Usage:
-//   This file implements the MongoDB QueryBuilder, translating universal query.Query
-//   specifications into MongoDB BSON filter documents ($match, $or, $and, $in, $regex, etc.).
-//   It powers CRUD queries, filtering, and aggregation stages on MongoAdapter collections.
+//
+//	This file implements the MongoDB QueryBuilder, translating universal query.Query
+//	specifications into MongoDB BSON filter documents ($match, $or, $and, $in, $regex, etc.).
+//	It powers CRUD queries, filtering, and aggregation stages on MongoAdapter collections.
 package mongodb
 
 import (
@@ -21,13 +22,32 @@ type QueryBuilder struct{}
 // BuildFilter translates query filters, raw expressions, and where groups to MongoDB filter documents.
 //
 // Purpose:
-//   Converts structured query.Filter conditions and raw expressions into standard MongoDB BSON filter maps.
+//
+//	Converts structured query.Filter conditions and raw expressions into standard MongoDB BSON filter maps.
 //
 // Where it is used:
 //   - Called by MongoAdapter.Find, FindOne, Update, and Delete operations.
 //
 // When can it be used:
 //   - When executing document queries or building $match pipeline stages.
+//
+// Parameters:
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by BuildFilter and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (b *QueryBuilder) BuildFilter(q query.Query) map[string]any {
 	filterDoc := make(map[string]any)
 	var andClauses []map[string]any
@@ -158,6 +178,24 @@ func (b *QueryBuilder) parseRawWhere(rw query.RawExpr) map[string]any {
 }
 
 // BuildSort translates sorts into MongoDB sort documents.
+//
+// Parameters:
+//   - sorts ([]query.Sort): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]int): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by BuildSort and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (b *QueryBuilder) BuildSort(sorts []query.Sort) map[string]int {
 	sortDoc := make(map[string]int)
 	for _, s := range sorts {
@@ -172,6 +210,24 @@ func (b *QueryBuilder) BuildSort(sorts []query.Sort) map[string]int {
 
 // BuildPipeline translates the unified Query into a full MongoDB aggregation pipeline
 // supporting $match, $lookup (relations/joins), $project, $sort, $skip, $limit, and $unionWith.
+//
+// Parameters:
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 ([]map[string]any): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by BuildPipeline and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (b *QueryBuilder) BuildPipeline(q query.Query) []map[string]any {
 	var pipeline []map[string]any
 

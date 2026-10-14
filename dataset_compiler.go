@@ -35,6 +35,24 @@ type MongoDataSetCompiler struct{}
 //
 // When can it be used:
 // Can be used during application initialization or adapter registration to provide MongoDB aggregation pipeline compilation.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (*MongoDataSetCompiler): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by NewMongoDataSetCompiler and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func NewMongoDataSetCompiler() *MongoDataSetCompiler {
 	return &MongoDataSetCompiler{}
 }
@@ -49,6 +67,27 @@ func NewMongoDataSetCompiler() *MongoDataSetCompiler {
 //
 // When can it be used:
 // Can be used whenever a DataSet definition has been planned and needs to be executed as an aggregation pipeline in MongoDB.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ast (*planner.QueryAST): Input value used by the operation.
+//   - ds (*domain.DataSet): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*compiler.CompiledPipeline): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Compile and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (c *MongoDataSetCompiler) Compile(ctx context.Context, ast *planner.QueryAST, ds *domain.DataSet) (*compiler.CompiledPipeline, error) {
 	if ast == nil {
 		return nil, domain.NewError(domain.ErrPipelineCompilationFailed, "cannot compile nil AST")
@@ -131,10 +170,10 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 
 			lookupStage = map[string]any{
 				"$lookup": map[string]any{
-					"from": j.ToTable,
-					"let":  map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
+					"from":     j.ToTable,
+					"let":      map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
 					"pipeline": pipeline,
-					"as": j.Alias,
+					"as":       j.Alias,
 				},
 			}
 		} else {
@@ -171,7 +210,10 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 		}
 		stages = append(stages, lookupStage)
 
-		// Unwind joined subdocuments so fields are directly accessible
+		// Keep MANY/JSON_ARRAY lookups as arrays; singular joins are unwound to objects.
+		if strings.EqualFold(j.Cardinality, "MANY") || strings.EqualFold(j.OutputFormat, "JSON_ARRAY") {
+			continue
+		}
 		preserveNull := true
 		if j.Type == domain.JoinInner {
 			preserveNull = false
@@ -341,6 +383,9 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 		hasExplicitID := false
 
 		for _, p := range ast.Projections {
+			if mongoNestedJoin(ast, p.SourceTable) != nil {
+				continue
+			}
 			alias := p.Alias
 			if alias == "" {
 				alias = p.SourceField
@@ -354,6 +399,29 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 				projectStage[alias] = 1
 			} else {
 				projectStage[alias] = path
+			}
+		}
+
+		for i := range ast.Joins {
+			join := &ast.Joins[i]
+			if !strings.EqualFold(join.OutputFormat, "OBJECT") && !strings.EqualFold(join.OutputFormat, "JSON_ARRAY") && !strings.EqualFold(join.Cardinality, "MANY") {
+				continue
+			}
+			fields := mongoRelationProjections(ast, *join)
+			if strings.EqualFold(join.Cardinality, "MANY") || strings.EqualFold(join.OutputFormat, "JSON_ARRAY") {
+				item := make(map[string]any, len(fields))
+				for _, field := range fields {
+					item[mongoProjectionKey(*join, field)] = "$$item." + field.SourceField
+				}
+				projectStage[join.Alias] = map[string]any{
+					"$map": map[string]any{"input": "$" + join.Alias, "as": "item", "in": item},
+				}
+			} else {
+				object := make(map[string]any, len(fields))
+				for _, field := range fields {
+					object[mongoProjectionKey(*join, field)] = "$" + join.Alias + "." + field.SourceField
+				}
+				projectStage[join.Alias] = object
 			}
 		}
 
@@ -398,6 +466,36 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 
 	bytes, _ := json.Marshal(stages)
 	return string(bytes)
+}
+
+// mongoNestedJoin returns the nested-output join for an alias, if one exists.
+func mongoNestedJoin(ast *planner.QueryAST, sourceTable string) *planner.ASTJoin {
+	for i := range ast.Joins {
+		join := &ast.Joins[i]
+		if strings.EqualFold(join.Alias, sourceTable) && (strings.EqualFold(join.OutputFormat, "OBJECT") || strings.EqualFold(join.OutputFormat, "JSON_ARRAY") || strings.EqualFold(join.Cardinality, "MANY")) {
+			return join
+		}
+	}
+	return nil
+}
+
+// mongoRelationProjections returns fields selected from a specific joined relation.
+func mongoRelationProjections(ast *planner.QueryAST, join planner.ASTJoin) []planner.ASTProjection {
+	var fields []planner.ASTProjection
+	for _, projection := range ast.Projections {
+		if strings.EqualFold(projection.SourceTable, join.Alias) {
+			fields = append(fields, projection)
+		}
+	}
+	return fields
+}
+
+// mongoProjectionKey returns the nested document key for a relation field.
+func mongoProjectionKey(join planner.ASTJoin, projection planner.ASTProjection) string {
+	if projection.Alias == "" || projection.Alias == projection.SourceField || strings.EqualFold(projection.Alias, join.Alias+"_"+projection.SourceField) {
+		return projection.SourceField
+	}
+	return projection.Alias
 }
 
 // resolveFieldPath resolves a table-qualified column into its MongoDB document field path.
@@ -774,6 +872,27 @@ func (c *MongoDataSetCompiler) buildMongoExpression(cc planner.ASTCustomColumn, 
 //
 // When can it be used:
 // Can be used whenever an application holds a MongoAdapter instance and needs to compile a dataset.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ast (*planner.QueryAST): Input value used by the operation.
+//   - ds (*domain.DataSet): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*compiler.CompiledPipeline): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by CompileDataSet and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) CompileDataSet(ctx context.Context, ast *planner.QueryAST, ds *domain.DataSet) (*compiler.CompiledPipeline, error) {
 	return NewMongoDataSetCompiler().Compile(ctx, ast, ds)
 }
@@ -788,6 +907,24 @@ func (a *MongoAdapter) CompileDataSet(ctx context.Context, ast *planner.QueryAST
 //
 // When can it be used:
 // Can be used when initializing the dataset engine and registering MongoDB aggregation compiler capabilities.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (adapter.DataSetCompiler): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by DataSetCompiler and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) DataSetCompiler() adapter.DataSetCompiler {
 	return &genericCompilerWrapper{c: NewMongoDataSetCompiler()}
 }
@@ -806,6 +943,27 @@ type genericCompilerWrapper struct {
 //
 // When can it be used:
 // Can be used whenever compiling across module boundaries where interface{} decoupling is employed.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ast (any): Input value used by the operation.
+//   - ds (any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Compile and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (w *genericCompilerWrapper) Compile(ctx context.Context, ast any, ds any) (any, error) {
 	qAst, _ := ast.(*planner.QueryAST)
 	dSet, _ := ds.(*domain.DataSet)

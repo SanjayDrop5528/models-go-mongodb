@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SanjayDrop5528/models-go-mongodb"
 	"github.com/SanjayDrop5528/models-go-engine/dataset/domain"
 	"github.com/SanjayDrop5528/models-go-engine/dataset/planner"
+	"github.com/SanjayDrop5528/models-go-mongodb"
 )
 
 func TestMongoDataSetCompiler_BaseFilterAndParams(t *testing.T) {
@@ -86,6 +86,35 @@ func TestMongoDataSetCompiler_BaseFilterAndParams(t *testing.T) {
 	paramVal, ok := refMatch["status"].(map[string]any)
 	if !ok || paramVal["paramName"] != "status_param" {
 		t.Errorf("expected status param metadata in reference pipeline, got %v", refMatch["status"])
+	}
+}
+
+func TestMongoDataSetCompiler_NestedRelationsUseSelectedFields(t *testing.T) {
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{Collection: "orders"},
+		JoinCollections: []domain.JoinCollection{
+			{FromCollection: "orders", FromCollectionField: "customer_id", ToCollection: "customers", ToCollectionField: "id", NamedAs: "customer", Cardinality: "ONE", OutputFormat: "OBJECT"},
+			{FromCollection: "orders", FromCollectionField: "id", ToCollection: "items", ToCollectionField: "order_id", NamedAs: "items", Cardinality: "MANY", OutputFormat: "JSON_ARRAY"},
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "orders.id", HeaderName: "id"},
+			{Field: "customer.name", HeaderName: "customer_name"},
+			{Field: "items.sku", HeaderName: "items_sku"},
+		},
+	}
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := mongodb.NewMongoDataSetCompiler().Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.ExecutableQuery, `"customer":{"name":"$customer.name"}`) {
+		t.Fatalf("expected selected object field, got: %s", compiled.ExecutableQuery)
+	}
+	if !strings.Contains(compiled.ExecutableQuery, `"items":{"$map"`) || !strings.Contains(compiled.ExecutableQuery, `"sku":"$$item.sku"`) {
+		t.Fatalf("expected selected array field mapping, got: %s", compiled.ExecutableQuery)
 	}
 }
 

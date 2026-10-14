@@ -43,6 +43,10 @@
 
 ## 🚀 Usage Example
 
+### Selecting fields inside dataset relations
+
+`OBJECT` joins retain one projected subdocument. `MANY`/`JSON_ARRAY` joins retain the `$lookup` result as an array and use `$map` to include only relation fields present in `selected_list`. `NONE` keeps the existing flat projection behavior.
+
 ```go
 package main
 

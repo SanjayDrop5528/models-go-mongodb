@@ -3,10 +3,11 @@
 //
 // File: types.go
 // Usage:
-//   This file defines the type conversion mappings between core engine generic DataType
-//   enums (model.TypeString, model.TypeInt, model.TypeDecimal, model.TypeJSON, etc.) and
-//   MongoDB BSON types (string, int, long, double, bool, date, object, array, binData).
-//   It also builds MongoDB collection $jsonSchema validator documents.
+//
+//	This file defines the type conversion mappings between core engine generic DataType
+//	enums (model.TypeString, model.TypeInt, model.TypeDecimal, model.TypeJSON, etc.) and
+//	MongoDB BSON types (string, int, long, double, bool, date, object, array, binData).
+//	It also builds MongoDB collection $jsonSchema validator documents.
 package mongodb
 
 import (
@@ -17,13 +18,32 @@ import (
 // ToBSONType maps core DataType to MongoDB $jsonSchema bsonType.
 //
 // Purpose:
-//   Translates a generic engine data type enum into the corresponding BSON type name string.
+//
+//	Translates a generic engine data type enum into the corresponding BSON type name string.
 //
 // Where it is used:
 //   - Used by BuildJSONSchema and aggregation projection logic.
 //
 // When can it be used:
 //   - When declaring BSON schema validation rules or type checks in MongoDB.
+//
+// Parameters:
+//   - t (model.DataType): Input value used by the operation.
+//
+// Returns:
+//   - result1 (string): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by ToBSONType and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func ToBSONType(t model.DataType) string {
 	switch t {
 	case model.TypeString, model.TypeText:
@@ -52,13 +72,32 @@ func ToBSONType(t model.DataType) string {
 // BuildJSONSchema creates a MongoDB $jsonSchema validator document from a schema.
 //
 // Purpose:
-//   Generates a native MongoDB $jsonSchema document enforcing property types and required fields on collections.
+//
+//	Generates a native MongoDB $jsonSchema document enforcing property types and required fields on collections.
 //
 // Where it is used:
 //   - Used during collection creation and schema validation rule updates on MongoAdapter.
 //
 // When can it be used:
 //   - When establishing schema validation on a MongoDB collection.
+//
+// Parameters:
+//   - s (*schema.Schema): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by BuildJSONSchema and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func BuildJSONSchema(s *schema.Schema) map[string]any {
 	properties := make(map[string]any)
 	var required []string

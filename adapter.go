@@ -65,6 +65,25 @@ type MongoAdapter struct {
 //
 // When can it be used:
 //   - When connecting the models engine or Dataset Studio to a MongoDB instance or replica set.
+//
+// Parameters:
+//   - uri (string): Input value used by the operation.
+//   - database (string): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*MongoAdapter): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by NewMongoAdapter and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func NewMongoAdapter(uri, database string) *MongoAdapter {
 	if database == "" {
 		database = "dev"
@@ -78,11 +97,46 @@ func NewMongoAdapter(uri, database string) *MongoAdapter {
 	}
 }
 
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (string): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Name and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) Name() string {
 	return "mongodb"
 }
 
 // Capabilities returns MongoDB's supported feature matrix.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (adapter.Capabilities): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Capabilities and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) Capabilities() adapter.Capabilities {
 	return adapter.Capabilities{
 		Category:                    adapter.StorageCategoryDocument,
@@ -98,6 +152,24 @@ func (a *MongoAdapter) Capabilities() adapter.Capabilities {
 }
 
 // Client returns the underlying *mongo.Client handle.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (*mongo.Client): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Client and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) Client() *mongo.Client {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -105,16 +177,70 @@ func (a *MongoAdapter) Client() *mongo.Client {
 }
 
 // NativeClient returns the underlying *mongo.Client connection handle.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (any): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by NativeClient and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) NativeClient() any {
 	return a.Client()
 }
 
 // DatabaseName returns the target database name.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (string): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by DatabaseName and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) DatabaseName() string {
 	return a.GetDatabaseName()
 }
 
 // GetDatabaseName returns the target MongoDB database name.
+//
+// Parameters:
+//   - None.
+//
+// Returns:
+//   - result1 (string): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by GetDatabaseName and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - This function does not return an error.
+//
+// Note:
+//   - Callers should preserve the documented ownership and lifecycle of supplied values.
 func (a *MongoAdapter) GetDatabaseName() string {
 	if a.database != "" {
 		return a.database
@@ -164,6 +290,24 @@ func (a *MongoAdapter) getClient(ctx context.Context) (*mongo.Client, error) {
 }
 
 // EnsureMetadataTables creates 'model_configs' and 'data_models' collections in MongoDB if they do not exist.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by EnsureMetadataTables and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) EnsureMetadataTables(ctx context.Context) error {
 	client, err := a.getClient(ctx)
 	if err != nil || client == nil {
@@ -177,6 +321,26 @@ func (a *MongoAdapter) EnsureMetadataTables(ctx context.Context) error {
 }
 
 // ImportLiveMetadata introspects live MongoDB collections and auto-populates model_configs & data_models.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 ([]*model.ModelConfig): Returned value.
+//   - result2 ([]*model.DataModel): Returned value.
+//   - result3 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by ImportLiveMetadata and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) ImportLiveMetadata(ctx context.Context) ([]*model.ModelConfig, []*model.DataModel, error) {
 	client, err := a.getClient(ctx)
 	if err != nil || client == nil {
@@ -263,11 +427,45 @@ func (a *MongoAdapter) ImportLiveMetadata(ctx context.Context) ([]*model.ModelCo
 	return configs, fields, nil
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Connect and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Connect(ctx context.Context) error {
 	_, err := a.getClient(ctx)
 	return err
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Ping and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Ping(ctx context.Context) error {
 	client, err := a.getClient(ctx)
 	if err != nil {
@@ -279,6 +477,23 @@ func (a *MongoAdapter) Ping(ctx context.Context) error {
 	return nil
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Close and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Close(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -291,6 +506,26 @@ func (a *MongoAdapter) Close(ctx context.Context) error {
 }
 
 // GetSchema returns the collection schema including indexed fields and validator rules.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*schema.Schema): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by GetSchema and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) GetSchema(ctx context.Context, ref model.ModelRef) (*schema.Schema, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -307,11 +542,50 @@ func (a *MongoAdapter) GetSchema(ctx context.Context, ref model.ModelRef) (*sche
 }
 
 // ValidateSchemaPlan checks for MongoDB compatibility.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - p (*plan.SchemaPlan): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by ValidateSchemaPlan and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) ValidateSchemaPlan(ctx context.Context, p *plan.SchemaPlan) error {
 	return nil
 }
 
 // PreviewSchemaChange generates MongoDB commands and documents.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - p (*plan.SchemaPlan): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*plan.SchemaPreview): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by PreviewSchemaChange and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) PreviewSchemaChange(ctx context.Context, p *plan.SchemaPlan) (*plan.SchemaPreview, error) {
 	actions := make([]plan.NativeAction, 0, len(p.Operations))
 
@@ -406,6 +680,25 @@ func (a *MongoAdapter) PreviewSchemaChange(ctx context.Context, p *plan.SchemaPl
 }
 
 // ApplySchemaChange updates the MongoDB collections, indexes, or validator rules on live MongoDB and in memory.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - p (*plan.SchemaPlan): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by ApplySchemaChange and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) ApplySchemaChange(ctx context.Context, p *plan.SchemaPlan) error {
 	a.mu.Lock()
 	collName := p.StorageName
@@ -523,6 +816,27 @@ func (a *MongoAdapter) ApplySchemaChange(ctx context.Context, p *plan.SchemaPlan
 }
 
 // Create inserts or upserts a document into live MongoDB or in-memory fallback.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Create and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Create(ctx context.Context, ref model.ModelRef, data map[string]any) (map[string]any, error) {
 	collName := ref.StorageName
 	if collName == "" {
@@ -584,6 +898,28 @@ func (a *MongoAdapter) Create(ctx context.Context, ref model.ModelRef, data map[
 }
 
 // Find queries documents in live MongoDB or in-memory fallback.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 ([]map[string]any): Returned value.
+//   - result2 (int64): Returned value.
+//   - result3 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Find and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Find(ctx context.Context, ref model.ModelRef, q query.Query) ([]map[string]any, int64, error) {
 	q = q.EnsureDebugTrace()
 	started := time.Now()
@@ -772,10 +1108,52 @@ func mongoMockMatches(row map[string]any, filters []query.Filter) bool {
 }
 
 // FindOne retrieves a document by ID.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by FindOne and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) FindOne(ctx context.Context, ref model.ModelRef, id any) (map[string]any, error) {
 	return a.FindOneWithQuery(ctx, ref, id, query.NewQuery())
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by FindOneWithQuery and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) FindOneWithQuery(ctx context.Context, ref model.ModelRef, id any, q query.Query) (map[string]any, error) {
 	collName := ref.StorageName
 	if collName == "" {
@@ -838,6 +1216,28 @@ func (a *MongoAdapter) FindOneWithQuery(ctx context.Context, ref model.ModelRef,
 }
 
 // Update replaces a document by ID.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Update and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Update(ctx context.Context, ref model.ModelRef, id any, data map[string]any) (map[string]any, error) {
 	collName := ref.StorageName
 	if collName == "" {
@@ -897,6 +1297,28 @@ func (a *MongoAdapter) Update(ctx context.Context, ref model.ModelRef, id any, d
 }
 
 // Patch updates specific fields by ID.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Patch and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Patch(ctx context.Context, ref model.ModelRef, id any, data map[string]any) (map[string]any, error) {
 	collName := ref.StorageName
 	if collName == "" {
@@ -949,6 +1371,26 @@ func (a *MongoAdapter) Patch(ctx context.Context, ref model.ModelRef, id any, da
 }
 
 // Delete removes a document by ID.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - ref (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Delete and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Delete(ctx context.Context, ref model.ModelRef, id any) error {
 	collName := ref.StorageName
 	if collName == "" {
@@ -1000,6 +1442,26 @@ func (a *MongoAdapter) Delete(ctx context.Context, ref model.ModelRef, id any) e
 }
 
 // Execute runs native MongoDB commands or database operations.
+//
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - req (execution.ExecutionRequest): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*execution.ExecutionResult): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Execute and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Execute(ctx context.Context, req execution.ExecutionRequest) (*execution.ExecutionResult, error) {
 	switch req.Operation {
 	case operation.OpCommand, operation.OpCustom:
@@ -1092,6 +1554,24 @@ func (a *MongoAdapter) Execute(ctx context.Context, req execution.ExecutionReque
 	}
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (adapter.Transaction): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Begin and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (a *MongoAdapter) Begin(ctx context.Context) (adapter.Transaction, error) {
 	client, err := a.getClient(ctx)
 	if err == nil && client != nil {
@@ -1110,6 +1590,26 @@ type MongoTransaction struct {
 	session mongo.Session
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Create and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Create(ctx context.Context, m model.ModelRef, data map[string]any) (map[string]any, error) {
 	if t.session != nil {
 		var res map[string]any
@@ -1123,6 +1623,27 @@ func (t *MongoTransaction) Create(ctx context.Context, m model.ModelRef, data ma
 	return t.adapter.Create(ctx, m, data)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 ([]map[string]any): Returned value.
+//   - result2 (int64): Returned value.
+//   - result3 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Find and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Find(ctx context.Context, m model.ModelRef, q query.Query) ([]map[string]any, int64, error) {
 	if t.session != nil {
 		var res []map[string]any
@@ -1137,6 +1658,26 @@ func (t *MongoTransaction) Find(ctx context.Context, m model.ModelRef, q query.Q
 	return t.adapter.Find(ctx, m, q)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by FindOne and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) FindOne(ctx context.Context, m model.ModelRef, id any) (map[string]any, error) {
 	if t.session != nil {
 		var res map[string]any
@@ -1150,6 +1691,27 @@ func (t *MongoTransaction) FindOne(ctx context.Context, m model.ModelRef, id any
 	return t.adapter.FindOne(ctx, m, id)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - q (query.Query): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by FindOneWithQuery and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) FindOneWithQuery(ctx context.Context, m model.ModelRef, id any, q query.Query) (map[string]any, error) {
 	if t.session != nil {
 		var res map[string]any
@@ -1163,6 +1725,27 @@ func (t *MongoTransaction) FindOneWithQuery(ctx context.Context, m model.ModelRe
 	return t.adapter.FindOneWithQuery(ctx, m, id, q)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Update and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Update(ctx context.Context, m model.ModelRef, id any, data map[string]any) (map[string]any, error) {
 	if t.session != nil {
 		var res map[string]any
@@ -1176,6 +1759,27 @@ func (t *MongoTransaction) Update(ctx context.Context, m model.ModelRef, id any,
 	return t.adapter.Update(ctx, m, id, data)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//   - data (map[string]any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (map[string]any): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Patch and its owning package.
+//
+// Side Effects:
+//   - Does not intentionally mutate caller-owned input; configured dependencies may still be consulted.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Patch(ctx context.Context, m model.ModelRef, id any, data map[string]any) (map[string]any, error) {
 	if t.session != nil {
 		var res map[string]any
@@ -1189,6 +1793,25 @@ func (t *MongoTransaction) Patch(ctx context.Context, m model.ModelRef, id any, 
 	return t.adapter.Patch(ctx, m, id, data)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - m (model.ModelRef): Input value used by the operation.
+//   - id (any): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Delete and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Delete(ctx context.Context, m model.ModelRef, id any) error {
 	if t.session != nil {
 		return mongo.WithSession(ctx, t.session, func(sc mongo.SessionContext) error {
@@ -1198,10 +1821,46 @@ func (t *MongoTransaction) Delete(ctx context.Context, m model.ModelRef, id any)
 	return t.adapter.Delete(ctx, m, id)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//   - req (execution.ExecutionRequest): Input value used by the operation.
+//
+// Returns:
+//   - result1 (*execution.ExecutionResult): Returned value.
+//   - result2 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Execute and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Execute(ctx context.Context, req execution.ExecutionRequest) (*execution.ExecutionResult, error) {
 	return t.adapter.Execute(ctx, req)
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Commit and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Commit(ctx context.Context) error {
 	if t.session != nil {
 		defer t.session.EndSession(ctx)
@@ -1210,6 +1869,23 @@ func (t *MongoTransaction) Commit(ctx context.Context) error {
 	return nil
 }
 
+// Parameters:
+//   - ctx (context.Context): Input value used by the operation.
+//
+// Returns:
+//   - result1 (error): Returned value.
+//
+// Business Rules:
+//   - Follows the invariants documented by Rollback and its owning package.
+//
+// Side Effects:
+//   - May update receiver state, persistent storage, or configured external dependencies.
+//
+// Errors:
+//   - Returns validation, configuration, context, or underlying dependency errors.
+//
+// Note:
+//   - The context controls cancellation and request lifetime.
 func (t *MongoTransaction) Rollback(ctx context.Context) error {
 	if t.session != nil {
 		defer t.session.EndSession(ctx)
