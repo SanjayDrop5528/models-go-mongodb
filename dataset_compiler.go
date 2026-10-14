@@ -404,6 +404,9 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 
 		for i := range ast.Joins {
 			join := &ast.Joins[i]
+			if strings.EqualFold(join.OutputFormat, "NONE") || strings.EqualFold(join.Cardinality, "NONE") {
+				continue
+			}
 			if !strings.EqualFold(join.OutputFormat, "OBJECT") && !strings.EqualFold(join.OutputFormat, "JSON_ARRAY") && !strings.EqualFold(join.Cardinality, "MANY") {
 				continue
 			}
@@ -472,6 +475,9 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 func mongoNestedJoin(ast *planner.QueryAST, sourceTable string) *planner.ASTJoin {
 	for i := range ast.Joins {
 		join := &ast.Joins[i]
+		if strings.EqualFold(join.OutputFormat, "NONE") || strings.EqualFold(join.Cardinality, "NONE") {
+			continue
+		}
 		if strings.EqualFold(join.Alias, sourceTable) && (strings.EqualFold(join.OutputFormat, "OBJECT") || strings.EqualFold(join.OutputFormat, "JSON_ARRAY") || strings.EqualFold(join.Cardinality, "MANY")) {
 			return join
 		}
