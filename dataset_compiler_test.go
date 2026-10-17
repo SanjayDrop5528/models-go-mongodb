@@ -502,3 +502,179 @@ func TestMongoDataSetCompiler_SortAndPagination(t *testing.T) {
 		t.Errorf("expected $limit stage, got %s", pipelineJSON)
 	}
 }
+
+func TestMongoDataSetCompiler_ArrayRelationship_AnyFrom(t *testing.T) {
+	compiler := mongodb.NewMongoDataSetCompiler()
+
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{Collection: "employees"},
+		JoinCollections: []domain.JoinCollection{
+			{
+				FromCollection:      "employees",
+				FromCollectionField: "plant_mine",
+				ToCollection:        "plants",
+				ToCollectionField:   "id",
+				NamedAs:             "plant_details",
+				ConvertToString:     true,
+				CastMode:            "ANY_FROM",
+				Cardinality:         "ONE",
+				OutputFormat:        "OBJECT",
+			},
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "employees.id", HeaderName: "id", DataType: "STRING"},
+			{Field: "employees.plant_mine", HeaderName: "plant_mine", DataType: "ARRAY"},
+			{Field: "plant_details.name", HeaderName: "plant_name", DataType: "STRING"},
+		},
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiled, err := compiler.Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatalf("failed to compile: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	// Verify $lookup uses pipeline with $in matching foreign scalar against mapped local array:
+	if !strings.Contains(pipelineJSON, `"$in":[{"$toString":"$id"},{"$map"`) {
+		t.Fatalf("expected $in condition with $map on localVal, got: %s", pipelineJSON)
+	}
+	if !strings.Contains(pipelineJSON, `"$toString":"$$el"`) {
+		t.Fatalf("expected $toString on mapped array elements, got: %s", pipelineJSON)
+	}
+	if !strings.Contains(pipelineJSON, `"$lookup"`) {
+		t.Fatalf("expected $lookup stage, got: %s", pipelineJSON)
+	}
+}
+
+func TestMongoDataSetCompiler_ArrayRelationship_AnyTo(t *testing.T) {
+	compiler := mongodb.NewMongoDataSetCompiler()
+
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{Collection: "users"},
+		JoinCollections: []domain.JoinCollection{
+			{
+				FromCollection:      "users",
+				FromCollectionField: "role_id",
+				ToCollection:        "permissions",
+				ToCollectionField:   "allowed_roles",
+				NamedAs:             "permissions",
+				ConvertToString:     true,
+				CastMode:            "ANY_TO",
+				Cardinality:         "ONE",
+				OutputFormat:        "OBJECT",
+			},
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "users.id", HeaderName: "id", DataType: "STRING"},
+			{Field: "users.role_id", HeaderName: "role_id", DataType: "STRING"},
+			{Field: "permissions.allowed_roles", HeaderName: "allowed_roles", DataType: "ARRAY"},
+		},
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiled, err := compiler.Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatalf("failed to compile: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	// Verify $lookup uses pipeline with $in matching local scalar against mapped foreign array:
+	if !strings.Contains(pipelineJSON, `"$in":[{"$toString":"$$localVal"},{"$map"`) {
+		t.Fatalf("expected $in condition with scalar localVal and mapped foreign allowed_roles, got: %s", pipelineJSON)
+	}
+}
+
+func TestMongoDataSetCompiler_ArrayRelationship_AnyBoth(t *testing.T) {
+	compiler := mongodb.NewMongoDataSetCompiler()
+
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{Collection: "employees"},
+		JoinCollections: []domain.JoinCollection{
+			{
+				FromCollection:      "employees",
+				FromCollectionField: "tags",
+				ToCollection:        "groups",
+				ToCollectionField:   "target_tags",
+				NamedAs:             "matched_groups",
+				ConvertToString:     true,
+				CastMode:            "ANY_BOTH",
+				Cardinality:         "MANY",
+				OutputFormat:        "JSON_ARRAY",
+			},
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "employees.id", HeaderName: "id", DataType: "STRING"},
+			{Field: "employees.tags", HeaderName: "tags", DataType: "ARRAY"},
+			{Field: "matched_groups.target_tags", HeaderName: "target_tags", DataType: "ARRAY"},
+		},
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiled, err := compiler.Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatalf("failed to compile: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	// Verify set intersection is used for both arrays:
+	if !strings.Contains(pipelineJSON, `"$setIntersection"`) || !strings.Contains(pipelineJSON, `"$size"`) {
+		t.Fatalf("expected $setIntersection and $size condition for ANY_BOTH, got: %s", pipelineJSON)
+	}
+}
+
+func TestMongoDataSetCompiler_InvertedAnyTo_AutoCorrection(t *testing.T) {
+	compiler := mongodb.NewMongoDataSetCompiler()
+
+	// User accidentally selected ANY_TO when source (plant_mine) is an array and target (id) is scalar
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{Collection: "employees"},
+		JoinCollections: []domain.JoinCollection{
+			{
+				FromCollection:      "employees",
+				FromCollectionField: "plant_mine",
+				ToCollection:        "plants",
+				ToCollectionField:   "id",
+				NamedAs:             "plants",
+				ConvertToString:     true,
+				CastMode:            "ANY_TO", // Inverted!
+				Cardinality:         "ONE",
+				OutputFormat:        "OBJECT",
+			},
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "employees.id", HeaderName: "id", DataType: "STRING"},
+			{Field: "employees.plant_mine", HeaderName: "plant_mine", DataType: "ARRAY"},
+			{Field: "plants.id", HeaderName: "plant_id", DataType: "STRING"},
+		},
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiled, err := compiler.Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatalf("failed to compile: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	// Verify it was auto-corrected to ANY_FROM ($in: [{"$toString":"$id"}, mapped localVal]):
+	if !strings.Contains(pipelineJSON, `"$in":[{"$toString":"$id"},{"$map"`) {
+		t.Fatalf("expected auto-correction of inverted ANY_TO to $in: ['$id', localArray], got: %s", pipelineJSON)
+	}
+}
+

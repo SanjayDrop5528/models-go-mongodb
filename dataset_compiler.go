@@ -93,6 +93,8 @@ func (c *MongoDataSetCompiler) Compile(ctx context.Context, ast *planner.QueryAS
 		return nil, domain.NewError(domain.ErrPipelineCompilationFailed, "cannot compile nil AST")
 	}
 
+	enrichASTJoinTypes(ast, ds)
+
 	execPipeline := c.buildPipelineJSON(ast, false)
 	refPipeline := c.buildPipelineJSON(ast, true)
 
@@ -139,75 +141,7 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 
 	// 2. $lookup and immediate $unwind stages for joins
 	for _, j := range ast.Joins {
-		var lookupStage map[string]any
-		if j.ConvertString {
-			var localExpr any = "$$localVal"
-			var foreignExpr any = fmt.Sprintf("$%s", j.ToField)
-
-			switch strings.ToUpper(j.CastMode) {
-			case "FROM_ONLY":
-				localExpr = map[string]any{"$toString": "$$localVal"}
-			case "TO_ONLY":
-				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
-			default:
-				localExpr = map[string]any{"$toString": "$$localVal"}
-				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
-			}
-
-			pipeline := []map[string]any{
-				{
-					"$match": map[string]any{
-						"$expr": map[string]any{
-							"$eq": []any{foreignExpr, localExpr},
-						},
-					},
-				},
-			}
-
-			if len(j.JoinFilter) > 0 {
-				pipeline = append(pipeline, map[string]any{"$match": j.JoinFilter})
-			}
-
-			lookupStage = map[string]any{
-				"$lookup": map[string]any{
-					"from":     j.ToTable,
-					"let":      map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
-					"pipeline": pipeline,
-					"as":       j.Alias,
-				},
-			}
-		} else {
-			if len(j.JoinFilter) > 0 {
-				lookupStage = map[string]any{
-					"$lookup": map[string]any{
-						"from": j.ToTable,
-						"let":  map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
-						"pipeline": []map[string]any{
-							{
-								"$match": map[string]any{
-									"$expr": map[string]any{
-										"$eq": []any{fmt.Sprintf("$%s", j.ToField), "$$localVal"},
-									},
-								},
-							},
-							{
-								"$match": j.JoinFilter,
-							},
-						},
-						"as": j.Alias,
-					},
-				}
-			} else {
-				lookupStage = map[string]any{
-					"$lookup": map[string]any{
-						"from":         j.ToTable,
-						"localField":   j.FromField,
-						"foreignField": j.ToField,
-						"as":           j.Alias,
-					},
-				}
-			}
-		}
+		lookupStage := c.buildMongoJoinLookup(j)
 		stages = append(stages, lookupStage)
 
 		// Keep MANY/JSON_ARRAY lookups as arrays; singular joins are unwound to objects.
@@ -974,4 +908,292 @@ func (w *genericCompilerWrapper) Compile(ctx context.Context, ast any, ds any) (
 	qAst, _ := ast.(*planner.QueryAST)
 	dSet, _ := ds.(*domain.DataSet)
 	return w.c.Compile(ctx, qAst, dSet)
+}
+
+// MongoStructureCategory classifies MongoDB field structures.
+type MongoStructureCategory int
+
+const (
+	MongoStructureScalar MongoStructureCategory = iota
+	MongoStructureArray
+	MongoStructureJSONArray
+	MongoStructureJSONObject
+	MongoStructureJSONArrayOfObjects
+)
+
+// classifyMongoStructure determines the structure category and base type for a MongoDB column/field.
+func classifyMongoStructure(dataType string) (MongoStructureCategory, string) {
+	dt := strings.ToUpper(strings.TrimSpace(dataType))
+	if dt == "" {
+		return MongoStructureScalar, ""
+	}
+
+	// 1. Array of Objects
+	if strings.Contains(dt, "OBJECT[]") || strings.Contains(dt, "ARRAY_OF_OBJECTS") ||
+		strings.Contains(dt, "JSON_ARRAY_OF_OBJECTS") || dt == "[{}]" {
+		return MongoStructureJSONArrayOfObjects, "OBJECT"
+	}
+
+	// 2. JSON Array of scalars
+	if dt == "JSON_ARRAY" || dt == "JSONB_ARRAY" || dt == "JSON[]" || dt == "JSONB[]" || dt == "[]" {
+		return MongoStructureJSONArray, "STRING"
+	}
+
+	// 3. Object
+	if dt == "JSON_OBJECT" || dt == "JSONB_OBJECT" || dt == "{}" || dt == "JSON" || dt == "JSONB" || dt == "CUSTOM_TYPE" || dt == "OBJECT" {
+		return MongoStructureJSONObject, "OBJECT"
+	}
+
+	// 4. Native Array (STRING[], ARRAY, etc.)
+	if strings.HasSuffix(dt, "[]") || strings.HasPrefix(dt, "_") || dt == "ARRAY" {
+		base := strings.TrimSuffix(dt, "[]")
+		base = strings.TrimPrefix(base, "_")
+		if base == "" || base == "ARRAY" {
+			base = "STRING"
+		}
+		return MongoStructureArray, base
+	}
+
+	// 5. Scalar
+	return MongoStructureScalar, dt
+}
+
+// enrichASTJoinTypes introspects selected list and projections to populate join column data types.
+func enrichASTJoinTypes(ast *planner.QueryAST, ds *domain.DataSet) {
+	if ast == nil {
+		return
+	}
+	for i := range ast.Joins {
+		j := &ast.Joins[i]
+		if j.FromFieldDataType == "" {
+			j.FromFieldDataType = lookupFieldDataType(j.FromTable, j.FromField, ast, ds)
+		}
+		if j.ToFieldDataType == "" {
+			j.ToFieldDataType = lookupFieldDataType(j.ToTable, j.ToField, ast, ds)
+			if j.ToFieldDataType == "" {
+				j.ToFieldDataType = lookupFieldDataType(j.Alias, j.ToField, ast, ds)
+			}
+		}
+	}
+}
+
+func lookupFieldDataType(table, field string, ast *planner.QueryAST, ds *domain.DataSet) string {
+	tblClean := strings.ToLower(table)
+	if idx := strings.Index(tblClean, "."); idx >= 0 {
+		tblClean = tblClean[idx+1:]
+	}
+	fldLower := strings.ToLower(field)
+
+	// Check SelectedList
+	if ds != nil {
+		for _, s := range ds.SelectedList {
+			sField := strings.ToLower(s.Field)
+			if s.DataType != "" {
+				if sField == tblClean+"."+fldLower || sField == fldLower || strings.EqualFold(s.HeaderName, field) {
+					return s.DataType
+				}
+			}
+		}
+	}
+
+	// Check Projections
+	if ast != nil {
+		for _, p := range ast.Projections {
+			pTable := strings.ToLower(p.SourceTable)
+			if idx := strings.Index(pTable, "."); idx >= 0 {
+				pTable = pTable[idx+1:]
+			}
+			if (pTable == tblClean || pTable == strings.ToLower(table)) && strings.EqualFold(p.SourceField, field) {
+				if p.DataType != "" {
+					return p.DataType
+				}
+			}
+		}
+	}
+
+	// Heuristics
+	if fldLower == "id" || strings.HasSuffix(fldLower, "_id") || fldLower == "_id" {
+		return "STRING"
+	}
+	if strings.Contains(fldLower, "array") || strings.Contains(fldLower, "plant_mine") || strings.Contains(fldLower, "locations") || strings.Contains(fldLower, "days") || strings.Contains(fldLower, "tags") {
+		return "ARRAY"
+	}
+	if strings.HasSuffix(fldLower, "_at") || strings.HasSuffix(fldLower, "_date") || strings.Contains(fldLower, "date") {
+		return "DATE"
+	}
+	if strings.HasPrefix(fldLower, "is_") || strings.HasPrefix(fldLower, "has_") {
+		return "BOOLEAN"
+	}
+
+	return ""
+}
+
+// buildMongoJoinLookup constructs the $lookup stage for a joined collection.
+func (c *MongoDataSetCompiler) buildMongoJoinLookup(j planner.ASTJoin) map[string]any {
+	castMode := strings.ToUpper(strings.TrimSpace(j.CastMode))
+	relOp := strings.ToUpper(strings.TrimSpace(j.RelationshipOp))
+
+	fromCat, _ := classifyMongoStructure(j.FromFieldDataType)
+	toCat, _ := classifyMongoStructure(j.ToFieldDataType)
+
+	fromIsArray := fromCat == MongoStructureArray || fromCat == MongoStructureJSONArray || fromCat == MongoStructureJSONArrayOfObjects ||
+		castMode == "ANY_FROM" || castMode == "ANY_BOTH" || relOp == "ANY_FROM" || relOp == "ANY_BOTH"
+	toIsArray := toCat == MongoStructureArray || toCat == MongoStructureJSONArray || toCat == MongoStructureJSONArrayOfObjects ||
+		castMode == "ANY_TO" || castMode == "ANY_BOTH" || relOp == "ANY_TO" || relOp == "ANY_BOTH"
+
+	// Auto-correct inverted ANY_TO when source is array or target is scalar PK "id" / "_id"
+	if (castMode == "ANY_TO" || relOp == "ANY_TO") && (fromCat == MongoStructureArray || fromCat == MongoStructureJSONArray || strings.EqualFold(j.ToField, "id") || strings.EqualFold(j.ToField, "_id") || strings.Contains(strings.ToLower(j.FromField), "array") || strings.Contains(strings.ToLower(j.FromField), "plant_mine")) {
+		fromIsArray = true
+		toIsArray = false
+		if castMode == "ANY_TO" {
+			castMode = "ANY_FROM"
+		}
+		if relOp == "ANY_TO" {
+			relOp = "ANY_FROM"
+		}
+	}
+
+	// Fast path: standard equality without string conversion, no extra filter, no array operations
+	if !j.ConvertString && len(j.JoinFilter) == 0 && (relOp == "" || relOp == "=" || relOp == "EQ" || relOp == "EQUAL") && (castMode == "" || castMode == "BOTH") && !fromIsArray && !toIsArray {
+		return map[string]any{
+			"$lookup": map[string]any{
+				"from":         j.ToTable,
+				"localField":   j.FromField,
+				"foreignField": j.ToField,
+				"as":           j.Alias,
+			},
+		}
+	}
+
+	// Pipeline $lookup
+	var matchExpr map[string]any
+
+	if (fromIsArray && toIsArray) || castMode == "ANY_BOTH" || relOp == "ANY_BOTH" || relOp == "OVERLAPS" {
+		// 1. Array Overlap (Both are arrays): $gt: [ { $size: { $setIntersection: [localArr, foreignArr] } }, 0 ]
+		var localExpr any = map[string]any{"$ifNull": []any{"$$localVal", []any{}}}
+		var foreignExpr any = map[string]any{"$ifNull": []any{fmt.Sprintf("$%s", j.ToField), []any{}}}
+
+		if j.ConvertString {
+			if castMode != "TO_ONLY" {
+				localExpr = map[string]any{
+					"$map": map[string]any{
+						"input": map[string]any{"$ifNull": []any{"$$localVal", []any{}}},
+						"as":    "el",
+						"in":    map[string]any{"$toString": "$$el"},
+					},
+				}
+			}
+			if castMode != "FROM_ONLY" {
+				foreignExpr = map[string]any{
+					"$map": map[string]any{
+						"input": map[string]any{"$ifNull": []any{fmt.Sprintf("$%s", j.ToField), []any{}}},
+						"as":    "el",
+						"in":    map[string]any{"$toString": "$$el"},
+					},
+				}
+			}
+		}
+
+		matchExpr = map[string]any{
+			"$gt": []any{
+				map[string]any{
+					"$size": map[string]any{
+						"$setIntersection": []any{localExpr, foreignExpr},
+					},
+				},
+				0,
+			},
+		}
+	} else if fromIsArray && !toIsArray {
+		// 2. Source is Array, Target is Scalar: $in: [ foreignScalar, localArr ]
+		var localExpr any = map[string]any{"$ifNull": []any{"$$localVal", []any{}}}
+		var foreignExpr any = fmt.Sprintf("$%s", j.ToField)
+
+		if j.ConvertString {
+			if castMode != "TO_ONLY" {
+				localExpr = map[string]any{
+					"$map": map[string]any{
+						"input": map[string]any{"$ifNull": []any{"$$localVal", []any{}}},
+						"as":    "el",
+						"in":    map[string]any{"$toString": "$$el"},
+					},
+				}
+			}
+			if castMode != "FROM_ONLY" {
+				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
+			}
+		}
+
+		matchExpr = map[string]any{
+			"$in": []any{foreignExpr, localExpr},
+		}
+	} else if !fromIsArray && toIsArray {
+		// 3. Target is Array, Source is Scalar: $in: [ localScalar, foreignArr ]
+		var localExpr any = "$$localVal"
+		var foreignExpr any = map[string]any{"$ifNull": []any{fmt.Sprintf("$%s", j.ToField), []any{}}}
+
+		if j.ConvertString {
+			if castMode != "TO_ONLY" {
+				localExpr = map[string]any{"$toString": "$$localVal"}
+			}
+			if castMode != "FROM_ONLY" {
+				foreignExpr = map[string]any{
+					"$map": map[string]any{
+						"input": map[string]any{"$ifNull": []any{fmt.Sprintf("$%s", j.ToField), []any{}}},
+						"as":    "el",
+						"in":    map[string]any{"$toString": "$$el"},
+					},
+				}
+			}
+		}
+
+		matchExpr = map[string]any{
+			"$in": []any{localExpr, foreignExpr},
+		}
+	} else {
+		// 4. Scalar vs Scalar: $eq (or $ne)
+		var localExpr any = "$$localVal"
+		var foreignExpr any = fmt.Sprintf("$%s", j.ToField)
+
+		if j.ConvertString {
+			switch castMode {
+			case "FROM_ONLY":
+				localExpr = map[string]any{"$toString": "$$localVal"}
+			case "TO_ONLY":
+				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
+			default:
+				localExpr = map[string]any{"$toString": "$$localVal"}
+				foreignExpr = map[string]any{"$toString": fmt.Sprintf("$%s", j.ToField)}
+			}
+		}
+
+		op := "$eq"
+		if relOp == "<>" || relOp == "!=" || relOp == "NEQ" || relOp == "NOT_EQUAL" {
+			op = "$ne"
+		}
+		matchExpr = map[string]any{
+			op: []any{foreignExpr, localExpr},
+		}
+	}
+
+	pipeline := []map[string]any{
+		{
+			"$match": map[string]any{
+				"$expr": matchExpr,
+			},
+		},
+	}
+
+	if len(j.JoinFilter) > 0 {
+		pipeline = append(pipeline, map[string]any{"$match": j.JoinFilter})
+	}
+
+	return map[string]any{
+		"$lookup": map[string]any{
+			"from":     j.ToTable,
+			"let":      map[string]any{"localVal": fmt.Sprintf("$%s", j.FromField)},
+			"pipeline": pipeline,
+			"as":       j.Alias,
+		},
+	}
 }

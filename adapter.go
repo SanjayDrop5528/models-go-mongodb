@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/SanjayDrop5528/models-go-engine/model"
 	"github.com/SanjayDrop5528/models-go-engine/operation"
 	"github.com/SanjayDrop5528/models-go-engine/plan"
+	"github.com/SanjayDrop5528/models-go-engine/project"
 	"github.com/SanjayDrop5528/models-go-engine/query"
 	"github.com/SanjayDrop5528/models-go-engine/schema"
 
@@ -42,6 +44,13 @@ const (
 	ansiColorReset      = "\033[0m"
 	ansiColorYellowBold = "\033[1;33m"
 )
+
+// AdapterConfig specifies connection and configuration options for MongoAdapter.
+type AdapterConfig struct {
+	URI      string         `json:"uri,omitempty"`
+	Database string         `json:"database,omitempty"`
+	Options  map[string]any `json:"options,omitempty"`
+}
 
 // MongoAdapter implements the Adapter interface for MongoDB with live network and mock fallback support.
 type MongoAdapter struct {
@@ -90,6 +99,31 @@ func NewMongoAdapter(uri, database string) *MongoAdapter {
 	}
 	return &MongoAdapter{
 		uri:          uri,
+		database:     database,
+		queryBuilder: &QueryBuilder{},
+		mockStore:    make(map[string][]map[string]any),
+		mockSchemas:  make(map[string]*schema.Schema),
+	}
+}
+
+// NewMongoAdapterFromConfig creates a MongoAdapter directly from AdapterConfig.
+func NewMongoAdapterFromConfig(cfg AdapterConfig) *MongoAdapter {
+	return NewMongoAdapter(cfg.URI, cfg.Database)
+}
+
+// NewMongoAdapterFromProjectConfig creates a MongoAdapter directly from project.AdapterConfig.
+func NewMongoAdapterFromProjectConfig(cfg project.AdapterConfig) *MongoAdapter {
+	uri := cfg.ConnectionString
+	if uri == "" && cfg.ConnectionStringEnv != "" {
+		uri = os.Getenv(cfg.ConnectionStringEnv)
+	}
+	return NewMongoAdapter(uri, cfg.Database)
+}
+
+// NewMongoAdapterFromClient wraps an existing *mongo.Client connection pool with target database.
+func NewMongoAdapterFromClient(client *mongo.Client, database string) *MongoAdapter {
+	return &MongoAdapter{
+		client:       client,
 		database:     database,
 		queryBuilder: &QueryBuilder{},
 		mockStore:    make(map[string][]map[string]any),
@@ -250,10 +284,6 @@ func (a *MongoAdapter) GetDatabaseName() string {
 
 // getClient lazily and thread-safely connects to the live MongoDB Atlas cluster when a URI is provided.
 func (a *MongoAdapter) getClient(ctx context.Context) (*mongo.Client, error) {
-	if strings.TrimSpace(a.uri) == "" {
-		return nil, nil // Offline mock fallback mode
-	}
-
 	a.mu.RLock()
 	if a.client != nil {
 		c := a.client
@@ -261,6 +291,10 @@ func (a *MongoAdapter) getClient(ctx context.Context) (*mongo.Client, error) {
 		return c, nil
 	}
 	a.mu.RUnlock()
+
+	if strings.TrimSpace(a.uri) == "" {
+		return nil, nil // Offline mock fallback mode
+	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -368,7 +402,7 @@ func (a *MongoAdapter) ImportLiveMetadata(ctx context.Context) ([]*model.ModelCo
 			Name:                 modelName,
 			Table:                collName,
 			RefName:              collName,
-			Schema:               a.database,
+			Schema:               "", // MongoDB has no SQL schemas, only database & collection/table names
 			IsAttributeReference: false,
 			Description:          fmt.Sprintf("Auto-imported from MongoDB collection '%s'", collName),
 			Status:               model.ModelConfigStatusActive,
