@@ -880,5 +880,30 @@ func TestMongoDataSetCompiler_UserJoinedClaimsWithNestedBillImage(t *testing.T) 
 	}
 }
 
+func TestMongoDataSetCompiler_UserPayloadWithNumericLiteralCustomColumns(t *testing.T) {
+	rawJSON := `{"name":"dasdas","reference_name":"dasdas","driver":"mongodb","save_mode":"QUERY","base_collection":{"schema":"public","collection":"claims","filter":{},"_filterClause":"AND","_filterRules":[]},"join_collections":[],"custom_columns":[{"customColumnName":"calc_field_1","customLabelName":"Calc Field 1","customAggregateFnName":"MULTIPLY","type":"decimal","expression":"","fields":[{"tableName":"claims","fieldName":"amount","isLiteral":false,"value":""},{"tableName":"_LITERAL_","fieldName":"5","isLiteral":true,"value":5}],"_lastFnName":"MULTIPLY"},{"customColumnName":"calc_field_2","customLabelName":"Calc Field 2","customAggregateFnName":"ADD","type":"decimal","expression":"","fields":[{"tableName":"claims","fieldName":"points","isLiteral":false,"value":""},{"tableName":"_LITERAL_","fieldName":"0","isLiteral":true,"value":0}],"_lastFnName":"ADD"}],"group_by_fields":[],"schematic_table":[],"filter_params":[],"selected_list":[{"field":"claims.bill_image._id","headerName":"bill_image._id","dataType":"STRING"},{"field":"claims.bill_image.file_name","headerName":"bill_image.file_name","dataType":"STRING"},{"field":"claims.bill_image.ref_id","headerName":"bill_image.ref_id","dataType":"STRING"},{"field":"claims.bill_image.size","headerName":"bill_image.size","dataType":"DECIMAL"},{"field":"claims.bill_image.storage_name","headerName":"bill_image.storage_name","dataType":"STRING"},{"field":"claims.bill_image.uploaded_by","headerName":"bill_image.uploaded_by","dataType":"STRING"},{"field":"calc_field_1","headerName":"Calc Field 1","dataType":"decimal"},{"field":"calc_field_2","headerName":"Calc Field 2","dataType":"decimal"}],"_filterRules":[],"_filterClause":"AND","filter":{}}`
 
+	var ds domain.DataSet
+	if err := json.Unmarshal([]byte(rawJSON), &ds); err != nil {
+		t.Fatalf("failed to unmarshal JSON with numeric literal custom column values: %v", err)
+	}
 
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), &ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiler := mongodb.NewMongoDataSetCompiler()
+	compiled, err := compiler.Compile(context.Background(), ast, &ds)
+	if err != nil {
+		t.Fatalf("failed to compile pipeline: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	if !strings.Contains(pipelineJSON, `"$multiply":["$amount",5]`) && !strings.Contains(pipelineJSON, `"$multiply": ["$amount", 5]`) && !strings.Contains(pipelineJSON, `"$multiply"`) {
+		t.Fatalf("expected $multiply stage, got: %s", pipelineJSON)
+	}
+	if !strings.Contains(pipelineJSON, `"$add":["$points",0]`) && !strings.Contains(pipelineJSON, `"$add": ["$points", 0]`) && !strings.Contains(pipelineJSON, `"$add"`) {
+		t.Fatalf("expected $add stage, got: %s", pipelineJSON)
+	}
+}

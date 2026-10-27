@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SanjayDrop5528/models-go-engine/adapter"
@@ -537,6 +538,16 @@ func (c *MongoDataSetCompiler) resolveFieldRef(table, field string, ast *planner
 // Can be used whenever converting an operand into a MongoDB aggregation expression value.
 func (c *MongoDataSetCompiler) formatMongoOperand(op planner.ASTOperand, ast *planner.QueryAST) any {
 	if op.IsLiteral || op.SourceTable == "_LITERAL_" {
+		if s, ok := op.LiteralVal.(string); ok {
+			trimmed := strings.TrimSpace(s)
+			if intVal, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+				return intVal
+			}
+			if floatVal, err := strconv.ParseFloat(trimmed, 64); err == nil {
+				return floatVal
+			}
+			return s
+		}
 		return op.LiteralVal
 	}
 	if op.SourceTable == "" || op.SourceTable == "CALC" {
