@@ -285,10 +285,10 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 		// Post-group projection: unpack grouped keys and distinct count sizes
 		postGroupProject := make(map[string]any)
 		if len(ast.GroupBy) == 1 {
-			postGroupProject[ast.GroupBy[0].Field] = "$_id"
+			setProjectField(postGroupProject, ast.GroupBy[0].Field, "$_id")
 		} else if len(ast.GroupBy) > 1 {
 			for _, g := range ast.GroupBy {
-				postGroupProject[g.Field] = fmt.Sprintf("$_id.%s", g.Field)
+				setProjectField(postGroupProject, g.Field, fmt.Sprintf("$_id.%s", g.Field))
 			}
 		}
 
@@ -302,9 +302,9 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 					}
 				}
 				if isDistinct {
-					postGroupProject[cc.Alias] = map[string]any{"$size": fmt.Sprintf("$%s_set", cc.Alias)}
+					setProjectField(postGroupProject, cc.Alias, map[string]any{"$size": fmt.Sprintf("$%s_set", cc.Alias)})
 				} else {
-					postGroupProject[cc.Alias] = 1
+					setProjectField(postGroupProject, cc.Alias, 1)
 				}
 			}
 		}
@@ -324,15 +324,15 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 			if alias == "" {
 				alias = p.SourceField
 			}
-			if alias == "_id" {
+			if alias == "_id" || strings.HasPrefix(alias, "_id.") {
 				hasExplicitID = true
 			}
 
 			path := c.resolveFieldRef(p.SourceTable, p.SourceField, ast)
 			if alias == strings.TrimPrefix(path, "$") {
-				projectStage[alias] = 1
+				setProjectField(projectStage, alias, 1)
 			} else {
-				projectStage[alias] = path
+				setProjectField(projectStage, alias, path)
 			}
 		}
 
@@ -346,27 +346,21 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 			}
 			fields := mongoRelationProjections(ast, *join)
 			if strings.EqualFold(join.Cardinality, "MANY") || strings.EqualFold(join.OutputFormat, "JSON_ARRAY") {
-				item := make(map[string]any, len(fields))
-				for _, field := range fields {
-					item[mongoProjectionKey(*join, field)] = "$$item." + field.SourceField
-				}
-				projectStage[join.Alias] = map[string]any{
+				item := buildMongoRelationItem(*join, fields, "$$item.")
+				setProjectField(projectStage, join.Alias, map[string]any{
 					"$map": map[string]any{"input": "$" + join.Alias, "as": "item", "in": item},
-				}
+				})
 			} else {
-				object := make(map[string]any, len(fields))
-				for _, field := range fields {
-					object[mongoProjectionKey(*join, field)] = "$" + join.Alias + "." + field.SourceField
-				}
-				projectStage[join.Alias] = object
+				object := buildMongoRelationItem(*join, fields, "$"+join.Alias+".")
+				setProjectField(projectStage, join.Alias, object)
 			}
 		}
 
 		for _, cc := range ast.CustomColumns {
-			if cc.Alias == "_id" {
+			if cc.Alias == "_id" || strings.HasPrefix(cc.Alias, "_id.") {
 				hasExplicitID = true
 			}
-			projectStage[cc.Alias] = 1
+			setProjectField(projectStage, cc.Alias, 1)
 		}
 
 		if len(projectStage) > 0 {
@@ -436,6 +430,63 @@ func mongoProjectionKey(join planner.ASTJoin, projection planner.ASTProjection) 
 		return projection.SourceField
 	}
 	return projection.Alias
+}
+
+// buildMongoRelationItem builds a nested projection document for a relation, avoiding field names with '.'
+// and resolving parent-child redundancies (e.g., if "bill_image" is selected, sub-paths like "bill_image._id" are skipped).
+func buildMongoRelationItem(join planner.ASTJoin, fields []planner.ASTProjection, varPrefix string) map[string]any {
+	result := make(map[string]any)
+
+	// Set of parent fields that are explicitly projected as full objects
+	parentSet := make(map[string]bool)
+	for _, f := range fields {
+		if !strings.Contains(f.SourceField, ".") {
+			parentSet[f.SourceField] = true
+		}
+	}
+
+	for _, field := range fields {
+		src := field.SourceField
+		if !strings.Contains(src, ".") {
+			key := mongoProjectionKey(join, field)
+			result[key] = varPrefix + src
+			continue
+		}
+
+		parts := strings.Split(src, ".")
+		rootParent := parts[0]
+
+		// If root parent is already projected as a full document, skip subfields
+		if parentSet[rootParent] {
+			continue
+		}
+
+		// Navigate or create nested subdocument
+		curr := result
+		for i := 0; i < len(parts)-1; i++ {
+			part := parts[i]
+			if existing, ok := curr[part]; ok {
+				if m, ok := existing.(map[string]any); ok {
+					curr = m
+				} else {
+					newM := make(map[string]any)
+					curr[part] = newM
+					curr = newM
+				}
+			} else {
+				newM := make(map[string]any)
+				curr[part] = newM
+				curr = newM
+			}
+		}
+		leafKey := parts[len(parts)-1]
+		if field.Alias != "" && !strings.Contains(field.Alias, ".") && field.Alias != src {
+			leafKey = field.Alias
+		}
+		curr[leafKey] = varPrefix + src
+	}
+
+	return result
 }
 
 // resolveFieldPath resolves a table-qualified column into its MongoDB document field path.
@@ -1197,3 +1248,29 @@ func (c *MongoDataSetCompiler) buildMongoJoinLookup(j planner.ASTJoin) map[strin
 		},
 	}
 }
+
+// setProjectField sets a projection field while avoiding MongoDB path collisions.
+// In MongoDB $project, a parent field path (e.g. "delegates") and its subfield path (e.g. "delegates.time")
+// cannot both exist in the same $project stage (error Location31249: Path collision).
+func setProjectField(projectStage map[string]any, key string, val any) {
+	if key == "" {
+		return
+	}
+	// 1. If an ancestor of 'key' is already in projectStage, 'key' is already covered by that ancestor.
+	for existingKey := range projectStage {
+		if strings.HasPrefix(key, existingKey+".") {
+			return
+		}
+	}
+
+	// 2. If 'key' is an ancestor of any existing keys, remove those descendant keys.
+	for existingKey := range projectStage {
+		if strings.HasPrefix(existingKey, key+".") {
+			delete(projectStage, existingKey)
+		}
+	}
+
+	// 3. Set the key
+	projectStage[key] = val
+}
+

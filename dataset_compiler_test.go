@@ -678,3 +678,207 @@ func TestMongoDataSetCompiler_InvertedAnyTo_AutoCorrection(t *testing.T) {
 	}
 }
 
+func TestMongoDataSetCompiler_AvoidsProjectCollisionOnNestedAttributes(t *testing.T) {
+	compiler := mongodb.NewMongoDataSetCompiler()
+
+	ds := &domain.DataSet{
+		BaseCollection: domain.BaseCollection{
+			Collection: "shop",
+			Schema:     "public",
+		},
+		SelectedList: []domain.SelectedField{
+			{Field: "shop.contact_number", HeaderName: "contact_number", DataType: "STRING"},
+			{Field: "shop.shop_image.storage_name", HeaderName: "shop_image.storage_name", DataType: "STRING"},
+			{Field: "shop.shop_image", HeaderName: "shop_image", DataType: "JSON"},
+			{Field: "shop.delegates", HeaderName: "delegates", DataType: "ARRAY"},
+			{Field: "shop.delegates.time", HeaderName: "delegates.time", DataType: "DATETIME"},
+			{Field: "shop.delegates.user_id", HeaderName: "delegates.user_id", DataType: "STRING"},
+		},
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiled, err := compiler.Compile(context.Background(), ast, ds)
+	if err != nil {
+		t.Fatalf("failed to compile: %v", err)
+	}
+
+	var stages []map[string]any
+	if err := json.Unmarshal([]byte(compiled.ExecutableQuery), &stages); err != nil {
+		t.Fatalf("failed to parse executable pipeline: %v", err)
+	}
+
+	var projectStage map[string]any
+	for _, s := range stages {
+		if p, ok := s["$project"].(map[string]any); ok {
+			projectStage = p
+			break
+		}
+	}
+	if projectStage == nil {
+		t.Fatalf("expected $project stage in compiled pipeline, got: %s", compiled.ExecutableQuery)
+	}
+
+	// Verify "delegates" is present, but "delegates.time" and "delegates.user_id" are NOT present to prevent collision
+	if _, ok := projectStage["delegates"]; !ok {
+		t.Errorf("expected 'delegates' in $project")
+	}
+	if _, ok := projectStage["delegates.time"]; ok {
+		t.Errorf("expected 'delegates.time' to be excluded from $project to prevent path collision")
+	}
+	if _, ok := projectStage["delegates.user_id"]; ok {
+		t.Errorf("expected 'delegates.user_id' to be excluded from $project to prevent path collision")
+	}
+
+	// Verify "shop_image" (which was listed after shop_image.storage_name) superseded the child
+	if _, ok := projectStage["shop_image"]; !ok {
+		t.Errorf("expected 'shop_image' in $project")
+	}
+	if _, ok := projectStage["shop_image.storage_name"]; ok {
+		t.Errorf("expected 'shop_image.storage_name' to be excluded from $project because parent 'shop_image' is present")
+	}
+}
+
+func TestMongoDataSetCompiler_FullUserRawJSONPayload(t *testing.T) {
+	rawJSON := `{"name":"asdas","reference_name":"asdasdasd","driver":"mongodb","save_mode":"QUERY","base_collection":{"schema":"public","collection":"shop","filter":{},"_filterClause":"AND","_filterRules":[]},"join_collections":[],"custom_columns":[],"group_by_fields":[],"schematic_table":[],"filter_params":[],"selected_list":[{"field":"shop.contact_number","headerName":"contact_number","dataType":"STRING"},{"field":"shop.contact_name","headerName":"contact_name","dataType":"STRING"},{"field":"shop.timings","headerName":"timings","dataType":"ARRAY"},{"field":"shop.timings.closed","headerName":"timings.closed","dataType":"BOOLEAN"},{"field":"shop.timings.closing","headerName":"timings.closing","dataType":"STRING"},{"field":"shop.timings.day","headerName":"timings.day","dataType":"STRING"},{"field":"shop.timings.opening","headerName":"timings.opening","dataType":"STRING"},{"field":"shop.review_count","headerName":"review_count","dataType":"INT"},{"field":"shop.shop_image.storage_name","headerName":"shop_image.storage_name","dataType":"STRING"},{"field":"shop.shop_image","headerName":"shop_image","dataType":"JSON"},{"field":"shop._id","headerName":"_id","dataType":"STRING"},{"field":"shop.createdAt","headerName":"createdAt","dataType":"DATETIME"},{"field":"shop.delegates","headerName":"delegates","dataType":"ARRAY"},{"field":"shop.delegates.time","headerName":"delegates.time","dataType":"DATETIME"},{"field":"shop.delegates.user_id","headerName":"delegates.user_id","dataType":"STRING"},{"field":"shop.details","headerName":"details","dataType":"STRING"},{"field":"shop.enable_referral_bonus","headerName":"enable_referral_bonus","dataType":"BOOLEAN"},{"field":"shop.isShopDetailsComplete","headerName":"isShopDetailsComplete","dataType":"BOOLEAN"},{"field":"shop.location","headerName":"location","dataType":"ARRAY"},{"field":"shop.main_category","headerName":"main_category","dataType":"STRING"},{"field":"shop.name","headerName":"name","dataType":"STRING"},{"field":"shop.rating","headerName":"rating","dataType":"DECIMAL"},{"field":"shop.referral_points","headerName":"referral_points","dataType":"DECIMAL"},{"field":"shop.return_points_percent","headerName":"return_points_percent","dataType":"DECIMAL"},{"field":"shop.shop_image._id","headerName":"shop_image._id","dataType":"STRING"},{"field":"shop.shop_image.file_name","headerName":"shop_image.file_name","dataType":"STRING"},{"field":"shop.shop_image.ref_id","headerName":"shop_image.ref_id","dataType":"STRING"},{"field":"shop.shop_image.size","headerName":"shop_image.size","dataType":"DECIMAL"},{"field":"shop.shop_image.uploaded_by","headerName":"shop_image.uploaded_by","dataType":"STRING"},{"field":"shop.shop_image.uploaded_on","headerName":"shop_image.uploaded_on","dataType":"STRING"},{"field":"shop.shop_location","headerName":"shop_location","dataType":"JSON"},{"field":"shop.shop_location.lat","headerName":"shop_location.lat","dataType":"DECIMAL"},{"field":"shop.shop_location.lng","headerName":"shop_location.lng","dataType":"DECIMAL"},{"field":"shop.slabs","headerName":"slabs","dataType":"ARRAY"},{"field":"shop.slabs.max","headerName":"slabs.max","dataType":"DECIMAL"},{"field":"shop.slabs.min","headerName":"slabs.min","dataType":"DECIMAL"},{"field":"shop.slabs.money","headerName":"slabs.money","dataType":"DECIMAL"},{"field":"shop.slabs.points","headerName":"slabs.points","dataType":"DECIMAL"},{"field":"shop.street_view_image","headerName":"street_view_image","dataType":"JSON"},{"field":"shop.street_view_image._id","headerName":"street_view_image._id","dataType":"STRING"},{"field":"shop.street_view_image.file_name","headerName":"street_view_image.file_name","dataType":"STRING"},{"field":"shop.street_view_image.ref_id","headerName":"street_view_image.ref_id","dataType":"STRING"},{"field":"shop.street_view_image.size","headerName":"street_view_image.size","dataType":"DECIMAL"},{"field":"shop.street_view_image.storage_name","headerName":"street_view_image.storage_name","dataType":"STRING"},{"field":"shop.street_view_image.uploaded_by","headerName":"street_view_image.uploaded_by","dataType":"STRING"},{"field":"shop.street_view_image.uploaded_on","headerName":"street_view_image.uploaded_on","dataType":"STRING"},{"field":"shop.sub_category","headerName":"sub_category","dataType":"STRING"},{"field":"shop.total_views","headerName":"total_views","dataType":"INT"},{"field":"shop.update_by","headerName":"update_by","dataType":"STRING"},{"field":"shop.update_on","headerName":"update_on","dataType":"DATETIME"},{"field":"shop.updatedAt","headerName":"updatedAt","dataType":"DATETIME"}],"_filterRules":[],"_filterClause":"AND","filter":{}}`
+
+	var ds domain.DataSet
+	if err := json.Unmarshal([]byte(rawJSON), &ds); err != nil {
+		t.Fatalf("failed to unmarshal dataset json: %v", err)
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), &ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiler := mongodb.NewMongoDataSetCompiler()
+	compiled, err := compiler.Compile(context.Background(), ast, &ds)
+	if err != nil {
+		t.Fatalf("failed to compile pipeline: %v", err)
+	}
+
+	var stages []map[string]any
+	if err := json.Unmarshal([]byte(compiled.ExecutableQuery), &stages); err != nil {
+		t.Fatalf("failed to parse executable pipeline: %v", err)
+	}
+
+	var projectStage map[string]any
+	for _, s := range stages {
+		if p, ok := s["$project"].(map[string]any); ok {
+			projectStage = p
+			break
+		}
+	}
+	if projectStage == nil {
+		t.Fatalf("missing $project stage in compiled pipeline")
+	}
+
+	// Verify no path collisions exist in projectStage:
+	// For any pair of keys (k1, k2), k1 must not have prefix k2 + "."
+	for k1 := range projectStage {
+		for k2 := range projectStage {
+			if k1 != k2 && strings.HasPrefix(k1, k2+".") {
+				t.Errorf("Path collision detected: key '%s' is a child of key '%s' in $project", k1, k2)
+			}
+		}
+	}
+}
+
+func TestMongoDataSetCompiler_UserJoinedClaimsWithNestedBillImage(t *testing.T) {
+	rawJSON := `{
+		"name":"asdas",
+		"reference_name":"asdasdasd",
+		"driver":"mongodb",
+		"save_mode":"QUERY",
+		"base_collection":{"schema":"public","collection":"shop","filter":{},"_filterClause":"AND","_filterRules":[]},
+		"join_collections":[
+			{
+				"schema":"public",
+				"fromCollection":"shop",
+				"fromCollectionField":"_id",
+				"toCollection":"claims",
+				"toCollectionField":"shop_id",
+				"namedAs":"claims_alias",
+				"joinType":"LEFT",
+				"convert_To_String":false,
+				"filter":{},
+				"_filterClause":"AND",
+				"_filterRules":[],
+				"cardinality":"MANY",
+				"outputFormat":"JSON_ARRAY",
+				"fromFieldDataType":"string",
+				"toFieldDataType":"string",
+				"cast_mode":"BOTH"
+			}
+		],
+		"custom_columns":[],
+		"group_by_fields":[],
+		"schematic_table":[],
+		"filter_params":[],
+		"selected_list":[
+			{"field":"shop.contact_name","headerName":"contact_name","dataType":"STRING"},
+			{"field":"shop.contact_number","headerName":"contact_number","dataType":"STRING"},
+			{"field":"shop._id","headerName":"_id","dataType":"STRING"},
+			{"field":"shop.shop_image.storage_name","headerName":"shop_image.storage_name","dataType":"STRING"},
+			{"field":"shop.street_view_image.file_name","headerName":"street_view_image.file_name","dataType":"STRING"},
+			{"field":"shop.street_view_image.ref_id","headerName":"street_view_image.ref_id","dataType":"STRING"},
+			{"field":"shop.street_view_image.size","headerName":"street_view_image.size","dataType":"DECIMAL"},
+			{"field":"shop.shop_location","headerName":"shop_location","dataType":"JSON"},
+			{"field":"claims_alias.amount","headerName":"amount","dataType":"DECIMAL"},
+			{"field":"claims_alias.bill_image","headerName":"bill_image","dataType":"JSON"},
+			{"field":"claims_alias.bill_image._id","headerName":"bill_image._id","dataType":"STRING"},
+			{"field":"claims_alias.bill_image.file_name","headerName":"bill_image.file_name","dataType":"STRING"},
+			{"field":"claims_alias.bill_number","headerName":"bill_number","dataType":"STRING"},
+			{"field":"claims_alias.bill_image.uploaded_on","headerName":"bill_image.uploaded_on","dataType":"STRING"},
+			{"field":"claims_alias.reason","headerName":"reason","dataType":"STRING"},
+			{"field":"claims_alias.shop_id","headerName":"shop_id","dataType":"STRING"},
+			{"field":"claims_alias.points","headerName":"points","dataType":"DECIMAL"},
+			{"field":"claims_alias.status","headerName":"status","dataType":"STRING"},
+			{"field":"claims_alias.user_id","headerName":"user_id","dataType":"STRING"},
+			{"field":"claims_alias.created_on","headerName":"created_on","dataType":"DATETIME"},
+			{"field":"claims_alias.bill_image.size","headerName":"bill_image.size","dataType":"DECIMAL"},
+			{"field":"claims_alias.bill_image.storage_name","headerName":"bill_image.storage_name","dataType":"STRING"},
+			{"field":"claims_alias.bill_image.uploaded_by","headerName":"bill_image.uploaded_by","dataType":"STRING"}
+		],
+		"_filterRules":[],
+		"_filterClause":"AND",
+		"filter":{}
+	}`
+
+	var ds domain.DataSet
+	if err := json.Unmarshal([]byte(rawJSON), &ds); err != nil {
+		t.Fatalf("failed to unmarshal dataset json: %v", err)
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), &ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiler := mongodb.NewMongoDataSetCompiler()
+	compiled, err := compiler.Compile(context.Background(), ast, &ds)
+	if err != nil {
+		t.Fatalf("failed to compile pipeline: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+
+	// Assert that $map's in object has no keys with '.' like "bill_image._id"
+	if strings.Contains(pipelineJSON, `"bill_image._id"`) {
+		t.Fatalf("Found invalid key 'bill_image._id' in pipeline: %s", pipelineJSON)
+	}
+	if strings.Contains(pipelineJSON, `"bill_image.file_name"`) {
+		t.Fatalf("Found invalid key 'bill_image.file_name' in pipeline: %s", pipelineJSON)
+	}
+	// Assert bill_image is cleanly projected as "$$item.bill_image"
+	if !strings.Contains(pipelineJSON, `"bill_image":"$$item.bill_image"`) {
+		t.Fatalf("Expected '\"bill_image\":\"$$item.bill_image\"' in pipeline, got: %s", pipelineJSON)
+	}
+}
+
+
+
