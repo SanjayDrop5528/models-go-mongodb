@@ -904,6 +904,13 @@ func (a *MongoAdapter) Create(ctx context.Context, ref model.ModelRef, data map[
 		}
 	}
 
+	// For MongoDB native storage or dataset metadata, avoid storing redundant "id" when "_id" is present
+	if (ref.StorageName == "dataset" || pkCol == "_id") && doc["_id"] != nil {
+		if doc["id"] == doc["_id"] {
+			delete(doc, "id")
+		}
+	}
+
 	client, err := a.getClient(ctx)
 	if err != nil {
 		return nil, err
@@ -1304,6 +1311,11 @@ func (a *MongoAdapter) Update(ctx context.Context, ref model.ModelRef, id any, d
 		}
 		if _, hasID := docCopy["_id"]; !hasID {
 			docCopy["_id"] = id
+		}
+		if (ref.StorageName == "dataset" || pkCol == "_id") && docCopy["_id"] != nil {
+			if docCopy["id"] == docCopy["_id"] {
+				delete(docCopy, "id")
+			}
 		}
 		if _, err := coll.ReplaceOne(ctx, filter, docCopy, options.Replace().SetUpsert(true)); err != nil {
 			return nil, fmt.Errorf("mongodb update failed: %w", err)

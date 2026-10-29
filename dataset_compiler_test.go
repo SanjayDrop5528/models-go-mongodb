@@ -907,3 +907,49 @@ func TestMongoDataSetCompiler_UserPayloadWithNumericLiteralCustomColumns(t *test
 		t.Fatalf("expected $add stage, got: %s", pipelineJSON)
 	}
 }
+
+func TestMongoDataSetCompiler_BaseAndOverallFilterAppended(t *testing.T) {
+	rawJSON := `{
+		"name": "shop_test",
+		"reference_name": "shop_test",
+		"driver": "mongodb",
+		"base_collection": "shop",
+		"selected_list": [
+			{"field": "shop._id", "headerName": "_id", "dataType": "STRING"},
+			{"field": "shop.rating", "headerName": "rating", "dataType": "INT"},
+			{"field": "shop.status", "headerName": "status", "dataType": "STRING"}
+		],
+		"filter": {
+			"shop.status": "ACTIVE",
+			"shop.rating": {"$gte": 4}
+		}
+	}`
+
+	var ds domain.DataSet
+	if err := json.Unmarshal([]byte(rawJSON), &ds); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	ast, err := planner.NewPlanner(nil).BuildAST(context.Background(), &ds)
+	if err != nil {
+		t.Fatalf("failed to build AST: %v", err)
+	}
+
+	compiler := mongodb.NewMongoDataSetCompiler()
+	compiled, err := compiler.Compile(context.Background(), ast, &ds)
+	if err != nil {
+		t.Fatalf("failed to compile pipeline: %v", err)
+	}
+
+	pipelineJSON := compiled.ExecutableQuery
+	if !strings.Contains(pipelineJSON, `"$match"`) {
+		t.Fatalf("expected $match in pipeline, got: %s", pipelineJSON)
+	}
+	if !strings.Contains(pipelineJSON, `"ACTIVE"`) {
+		t.Fatalf("expected ACTIVE in $match, got: %s", pipelineJSON)
+	}
+	if !strings.Contains(pipelineJSON, `"$gte"`) {
+		t.Fatalf("expected $gte in $match, got: %s", pipelineJSON)
+	}
+}
+

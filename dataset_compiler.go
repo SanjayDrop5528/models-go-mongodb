@@ -126,7 +126,13 @@ func (c *MongoDataSetCompiler) buildPipelineJSON(ast *planner.QueryAST, paramete
 	matchStage := make(map[string]any)
 	if len(ast.BaseTable.Filter) > 0 {
 		for k, v := range ast.BaseTable.Filter {
-			matchStage[k] = v
+			key := k
+			if ast.BaseTable.Table != "" && strings.HasPrefix(key, ast.BaseTable.Table+".") {
+				key = strings.TrimPrefix(key, ast.BaseTable.Table+".")
+			} else if ast.BaseTable.Alias != "" && strings.HasPrefix(key, ast.BaseTable.Alias+".") {
+				key = strings.TrimPrefix(key, ast.BaseTable.Alias+".")
+			}
+			matchStage[key] = v
 		}
 	}
 
@@ -601,17 +607,17 @@ func (c *MongoDataSetCompiler) applyFilterCondition(matchStage map[string]any, p
 	}
 
 	switch op {
-	case "=", "EQ":
+	case "=", "EQ", "EQUALS":
 		matchStage[path] = val
-	case "!=", "<>", "NEQ":
+	case "!=", "<>", "NEQ", "NOT_EQUALS":
 		matchStage[path] = map[string]any{"$ne": val}
-	case ">", "GT":
+	case ">", "GT", "GREATER_THAN":
 		matchStage[path] = map[string]any{"$gt": val}
-	case ">=", "GTE":
+	case ">=", "GTE", "GREATER_THAN_OR_EQUAL":
 		matchStage[path] = map[string]any{"$gte": val}
-	case "<", "LT":
+	case "<", "LT", "LESS_THAN":
 		matchStage[path] = map[string]any{"$lt": val}
-	case "<=", "LTE":
+	case "<=", "LTE", "LESS_THAN_OR_EQUAL":
 		matchStage[path] = map[string]any{"$lte": val}
 	case "IN":
 		matchStage[path] = map[string]any{"$in": val}
